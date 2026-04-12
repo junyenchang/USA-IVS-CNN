@@ -3,3 +3,4 @@
 DB/*
 !DB/.gitkeep
 __pycache__/
+*.egg-info/
