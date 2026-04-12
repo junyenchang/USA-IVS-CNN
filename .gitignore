@@ -1,0 +1,5 @@
+.venv
+.vscode
+DB/*
+!DB/.gitkeep
+__pycache__/
