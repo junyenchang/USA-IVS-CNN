@@ -35,6 +35,7 @@ dill==0.4.0
 dllist==2.0.0
 dm-tree==0.1.9
 docstring_parser==0.17.0
+dotenv==0.9.9
 einops==0.8.1
 execnet==2.1.2
 executing==2.2.1
@@ -176,6 +177,7 @@ pytest-rerunfailures==16.1
 pytest-shard==0.1.2
 pytest-xdist==3.8.0
 python-dateutil==2.9.0.post0
+python-dotenv==1.2.2
 python-json-logger==4.0.0
 python_hostlist==2.3.0
 pytokens==0.3.0

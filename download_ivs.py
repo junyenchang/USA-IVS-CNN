@@ -1,10 +1,14 @@
+import os
 from src.path import OptionPath
 from src.wrds_client import WRDSClient
+
+from dotenv import load_dotenv
+load_dotenv()
 
 def main():
     OptionPath.ensure_dirs() # ensure output directories exist
 
-    loader = WRDSClient(username='jimsir49')
+    loader = WRDSClient(username=str(os.getenv('WRDS_USERNAME')))
     years_to_fetch = range(1996, 2025) # 1996-2024
 
 
