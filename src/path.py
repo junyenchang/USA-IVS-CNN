@@ -16,7 +16,19 @@ class OptionPath:
     @classmethod
     def ensure_dirs(cls) -> None:
         """確保所有必要資料夾存在。"""
-        for path in [cls.IVS]:
+        for path in [cls.ROOT, cls.IVS]:
+            os.makedirs(path, exist_ok=True)
+
+class ResultsPath:
+    ROOT: str = os.path.join(PROJECT_ROOT, "Results")
+
+    CNN: str = os.path.join(ROOT, "CNN")
+
+    @classmethod
+    def ensure_dirs(cls) -> None:
+        """確保所有必要資料夾存在。"""
+        for path in [cls.ROOT, cls.CNN]:
             os.makedirs(path, exist_ok=True)
 
 OptionPath.ensure_dirs()
+ResultsPath.ensure_dirs()
