@@ -215,3 +215,27 @@ class WRDSClient:
                         print(f"重置連線失敗，請檢查網路狀態: {re_e}")
                 else:
                     print(f"已達到最大重試次數 ({max_retries})，放棄抓取 {year} 年資料。")
+
+    def fetch_spy_benchmark(self, output_dir: str, start_year: int=1996, end_year: int=2025):
+        """抓取 SPY ETF 作為回測基準"""
+        print(f"正在抓取 SPY (PERMNO: 84398) 由 {start_year} 至 {end_year} 的資料...")
+
+        sql_query = f"""
+        SELECT
+            date,
+            ret AS spy_ret
+        FROM crsp.dsf
+        WHERE permno = 84398
+        AND date >= '{start_year}-01-01'
+        AND date <= '{end_year}-12-31'
+        ORDER BY date
+        """
+
+        df = self.db.raw_sql(sql_query, date_cols=['date'])
+
+        if not df.empty:
+            file_name = os.path.join(output_dir, 'spy_benchmark.parquet')
+            df.to_parquet(file_name, engine='pyarrow')
+            print(f"SPY 基準資料已儲存至 {file_name}")
+        else:
+            print("未抓取到 SPY 資料。")
