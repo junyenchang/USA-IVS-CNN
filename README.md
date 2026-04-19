@@ -17,7 +17,7 @@
 
 ## 如何抓取資料 (Data)
 
-專案內提供自動化的下載腳本 `download_ivs.py`，負責從 WRDS (OptionMetrics, CRSP) 抓取、清理並整合指定年份範圍內的選擇權隱含波動率曲面 (IVS) 以及對應的結算與市值資料。
+專案內提供自動化的下載腳本 `download_ivs.py`，負責從 WRDS (OptionMetrics, CRSP) 抓取、清理並整合指定年份範圍內的選擇權隱含波動率曲面 (IVS)、對應的結算與市值資料，以及作為回測投組績效比較基準 (Benchmark) 的 SPY ETF 報酬率資料。
 
 ### 下載步驟
 
@@ -41,8 +41,8 @@
    並建議你建立本地憑證檔案 (`.pgpass`)，後續即可自動登入不用再打密碼和驗證。
 
 3. **資料儲存與輸出**
-   - 預設會下載 `1996` 至 `2024` 年的資料。
-   - 所有處理完的資料會依序被產出並儲存在專案內的 `DB/OptionDB/USA_IVS/` 目錄中。
+   - 預設會下載 `1996` 至 `2024` 年的選擇權資料，以及涵蓋相同區間的 SPY 基準報酬率資料。
+   - 所有處理完的資料（包含每年的 IVS 資料與 `spy_benchmark.parquet`）會依序產出並儲存在專案內的 `DB/OptionDB/USA_IVS/` 和 `DB/OptionDB/SPY_Benchmark/` 目錄中。
 
 ### 使用 Notebook 探索與自訂抓取範圍
 如果對於想改變抓取的資料範圍（例如：針對特定公司或條件限制），可以直接修改腳本或 `src/wrds_client.py` 內建的 SQL 指令。如果想了解內建 SQL 指令的詳細解說及邏輯運作方式，請參考 [docs/sql_query_explanation.md](docs/sql_query_explanation.md)。

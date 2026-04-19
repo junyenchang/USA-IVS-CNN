@@ -35,7 +35,10 @@ filtered_ivs AS (
 ```sql
 raw_link AS (
     SELECT secid, permno, sdate, edate,
-        LAG(edate) OVER (PARTITION BY permno ORDER BY sdate ASC, secid ASC) AS prev_edate
+        LAG(edate) OVER (
+            PARTITION BY permno
+            ORDER BY sdate ASC, secid ASC -- 加上 secid ASC 消除同日期的隨機性
+        ) AS prev_edate
     FROM wrdsapps.opcrsphist
     WHERE score = 1
 ),
@@ -45,16 +48,26 @@ valid_link AS (
     WHERE prev_edate IS NULL OR sdate > prev_edate
 ),
 target_permnos AS (
-    SELECT DISTINCT permno
-    FROM valid_link
-    WHERE sdate <= '{year}-12-31' AND (edate >= '{year}-01-01' OR edate IS NULL)
+    SELECT DISTINCT vl.permno
+    FROM valid_link AS vl
+    INNER JOIN crsp.msenames n
+        ON vl.permno = n.permno
+        -- 確保抓的是這家公司在該年度的正確屬性 (因為公司可能轉板)
+        AND n.namedt <= '{year}-12-31'
+        AND n.nameendt >= '{year}-01-01'
+    WHERE vl.sdate <= '{year}-12-31'
+    AND (vl.edate >= '{year}-01-01' OR vl.edate IS NULL)
+    -- 限制為美國三大交易所普通股
+    AND n.shrcd IN (10, 11) -- Ensure only common stocks
+    AND n.exchcd IN (1, 2, 3) -- Ensure only NYSE, AMEX, and NASDAQ stocks
+    AND n.siccd NOT IN (6770, 6799, 6722, 6726) -- Exclude financial stocks
 )
 ```
-- **目的**：建立 `secid` (OptionMetrics 識別碼) 與 `permno` (CRSP 識別碼) 的正確連結。
+- **目的**：建立 `secid` (OptionMetrics 識別碼) 與 `permno` (CRSP 識別碼) 的正確連結，並篩選出符合條件的目標股票。
 - **作法**：
-  - `raw_link`: 找出匹配度最高 (`score = 1`) 的連結，並透過 `LAG` 函數取得上一筆結束日期 (`prev_edate`)，用以檢查區間重疊。
+  - `raw_link`: 找出匹配度最高 (`score = 1`) 的連結，並透過 `LAG` 函數取得上一筆結束日期 (`prev_edate`)，用以檢查區間重疊。排序時加入 `secid ASC` 以消除同日期的隨機性。
   - `valid_link`: 過濾掉日期重疊的異常資料，確保連結有效。
-  - `target_permnos`: 取出該年度內有效的標的股票 `permno` 列表。
+  - `target_permnos`: 聯結 `crsp.msenames` 表，確認公司在該年度的交易所狀態，過濾出屬於美國三大交易所 (NYSE, AMEX, NASDAQ) 的普通股 (`shrcd IN (10, 11)` 和 `exchcd IN (1, 2, 3)`)，同時排除金融類股 (`siccd`)。
 
 ## 4. `daily_returns` & `monthly_accumulated` (計算 CRSP 月報酬率)
 ```sql
@@ -81,14 +94,25 @@ monthly_accumulated AS (
 ## 5. `crsp_me` (計算公司市值)
 ```sql
 crsp_me AS (
-    SELECT m.permno, date_trunc('month', m.date) AS month_start, ABS(m.prc) * m.shrout AS me, n.exchcd, n.shrcd
+    SELECT
+        m.permno,
+        date_trunc('month', m.date) AS month_start,
+        ABS(m.prc) * m.shrout AS me,
+        n.exchcd,
+        n.shrcd
     FROM crsp.msf m
-    LEFT JOIN crsp.msenames n ON m.permno = n.permno AND m.date >= n.namedt AND m.date <= n.nameendt
-    WHERE m.date >= '{year}-01-01' AND m.date <= '{year}-12-31' AND m.prc IS NOT NULL AND m.shrout IS NOT NULL
+    LEFT JOIN crsp.msenames n
+        ON m.permno = n.permno
+        AND m.date >= n.namedt AND m.date <= n.nameendt
+    WHERE m.date >= '{year}-01-01' AND m.date <= '{year}-12-31'
+    AND m.prc IS NOT NULL AND m.shrout IS NOT NULL
+    AND n.shrcd IN (10, 11)
+    AND n.exchcd IN (1, 2, 3)
+    AND n.siccd NOT IN (6770, 6799, 6722, 6726)
 )
 ```
-- **目的**：計算各股票每月的市值 (Market Equity, ME)。
-- **作法**：透過收盤價絕對值 (`ABS(prc)`) 乘以流通股數 (`shrout`) 計算市值。同時透過 `crsp.msenames` 取得交易所代碼 (`exchcd`) 與股票類別碼 (`shrcd`)。
+- **目的**：計算各股票每月的市值 (Market Equity, ME)，並再次確保股票符合特定條件。
+- **作法**：透過收盤價絕對值 (`ABS(prc)`) 乘以流通股數 (`shrout`) 計算市值。透過 `crsp.msenames` 取得交易所代碼 (`exchcd`) 與股票類別碼 (`shrcd`)，且同樣篩選了三大交易所普通股並排除了金融股。
 
 ## 6. `nyse_bkp` (計算 NYSE 交易所市值分界點)
 ```sql
@@ -108,8 +132,17 @@ nyse_bkp AS (
 ## 7. `SELECT` 主要查詢區塊 (整合所有資料與分類)
 ```sql
 SELECT
-    f.secid, l.permno, f.date AS opt_date, f.days, f.delta, f.impl_volatility,
-    m.crsp_date, m.crsp_monthly_return, c_me.me AS market_cap,
+    f.secid,
+    l.permno,
+    f.date AS opt_date,
+    f.days,
+    f.delta,
+    f.impl_volatility,
+    m.crsp_date,
+    m.crsp_monthly_return,
+    c_me.me AS market_cap,
+    c_me.shrcd,
+
     CASE
         WHEN c_me.me > bkp.p80 THEN 'Mega'
         WHEN c_me.me > bkp.p50 AND c_me.me <= bkp.p80 THEN 'Large'
@@ -117,16 +150,30 @@ SELECT
         WHEN c_me.me <= bkp.p20 THEN 'Micro'
         ELSE NULL
     END AS size_group,
+
     CASE WHEN c_me.me > bkp.p20 THEN TRUE ELSE FALSE END AS is_non_micro
+
 FROM filtered_ivs f
-INNER JOIN valid_link l ON f.secid = l.secid AND f.date >= l.sdate AND (f.date <= l.edate OR l.edate IS NULL)
-LEFT JOIN monthly_accumulated m ON l.permno = m.permno AND date_trunc('month', f.date) = m.crsp_date
-LEFT JOIN crsp_me c_me ON l.permno = c_me.permno AND date_trunc('month', f.date) = c_me.month_start
-LEFT JOIN nyse_bkp bkp ON date_trunc('month', f.date) = bkp.month_start
+INNER JOIN valid_link l
+    ON f.secid = l.secid
+    AND f.date >= l.sdate
+    AND (f.date <= l.edate OR l.edate IS NULL)
+INNER JOIN target_permnos tp -- 提早過濾掉非目標的 Permno
+    ON l.permno = tp.permno
+LEFT JOIN monthly_accumulated m
+    ON l.permno = m.permno
+    AND date_trunc('month', f.date) = m.crsp_date
+INNER JOIN crsp_me c_me
+    ON l.permno = c_me.permno
+    AND date_trunc('month', f.date) = c_me.month_start
+LEFT JOIN nyse_bkp bkp
+    ON date_trunc('month', f.date) = bkp.month_start
 ```
 - **目的**：將先前的暫存表彙整，並為每一筆資料標註上規模群組標籤。
 - **作法**：
   - 將篩選過的隱含波動率表 (`filtered_ivs`) 透過 `valid_link` 連結至 CRSP 的 `permno`。
-  - 將月報酬率 (`monthly_accumulated`) 及市值資料 (`crsp_me`) 依據 `permno` 與月份合併進來。
+  - 使用 `INNER JOIN target_permnos` 提早過濾掉不屬於美國三大交易所普通股或屬於金融類股的 `permno`，以提高效能。
+  - 將月報酬率 (`monthly_accumulated`) 及市值資料 (`crsp_me`) 依據 `permno` 與月份合併進來。此處採用了對 `crsp_me` 的 `INNER JOIN`，進一步確保資料完整與符合篩選條件。
   - 將市值以該月份對應的 NYSE 分界點 (`nyse_bkp`) 大小分為 `Mega`、`Large`、`Small`、`Micro` 四種規模。
+  - 加入股票類別碼 `c_me.shrcd` 作為回傳欄位。
   - `is_non_micro`: 標記是否為大於 20% 分位數的非微型股 (Non-micro)。
