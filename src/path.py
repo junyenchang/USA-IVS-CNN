@@ -13,11 +13,12 @@ class OptionPath:
 
     IVS: str = os.path.join(ROOT, "USA_IVS")
     Benchmark: str = os.path.join(ROOT, "SPY_Benchmark")
+    StockInfo: str = os.path.join(ROOT, "Stock_Info")
 
     @classmethod
     def ensure_dirs(cls) -> None:
         """確保所有必要資料夾存在。"""
-        for path in [cls.ROOT, cls.IVS, cls.Benchmark]:
+        for path in [cls.ROOT, cls.IVS, cls.Benchmark, cls.StockInfo]:
             os.makedirs(path, exist_ok=True)
 
 class ResultsPath:
