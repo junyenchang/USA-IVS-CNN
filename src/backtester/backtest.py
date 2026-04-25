@@ -28,7 +28,7 @@ class BacktestEngine:
         df = df.drop_duplicates(subset=['YearMonth', 'Permno'], keep='last') # 每月最後一天的預測值代表該月的持倉決策
 
         # 2. 分組計算 Quantile 決定 Long/Short 部位 (每月月底)
-        def assign_weights(group):
+        def assign_weights(group: pd.DataFrame) -> pd.DataFrame:
             # 切分 10 組，排除 NaN
             valid_preds = group['Pred'].dropna()
             if len(valid_preds) < 10:
@@ -62,17 +62,17 @@ class BacktestEngine:
         months = sorted(self.df['YearMonth'].unique())
 
         results = []
+        detailed_records = [] # 記錄每個月的個股明細
         drifted_weights = pd.Series(dtype=float) # 記錄上一期的結算漂移權重
 
         for t_month in months:
-            current_month = self.df[self.df['YearMonth'] == t_month].set_index('Permno')
+            current_month = pd.DataFrame(self.df[self.df['YearMonth'] == t_month].set_index('Permno'))
 
             # --- 1. 目標權重與實際報酬 ---
             w_target = current_month['target_weight'].fillna(0)
             returns = current_month['Actual'].fillna(0)
             is_microcap = current_month['is_microcap'].fillna(False)
 
-            # 對齊資產池 (包含上月持有但本月不在預測名單內的股票，須平倉)
             all_assets = w_target.index.union(drifted_weights.index)
             w_target = w_target.reindex(all_assets, fill_value=0.0)
             w_drifted = drifted_weights.reindex(all_assets, fill_value=0.0)
@@ -81,27 +81,41 @@ class BacktestEngine:
 
             # --- 2. 計算交易手續費 (TC_t) ---
             turnover = (w_target - w_drifted).abs()
-            # 微型股手續費 x 2
-            fee_multiplier = np.where(is_microcap, 2.0, 1.0)
-            transaction_costs = turnover * self.base_fee * fee_multiplier
+            fee_multiplier = np.where(is_microcap, 2.0, 1.0) # 微型股手續費加倍
+            transaction_costs = turnover * self.base_fee * fee_multiplier  # 這是每一檔股票的 TC Detail
             total_tc = transaction_costs.sum()
 
             # --- 3. 計算放空成本 (SC_t) ---
-            # 僅針對 w_target < 0 的部位，且微型股 4.8%，大型股 2.5%
             short_positions = w_target[w_target < 0].abs()
             short_fee_rate = np.where(is_microcap.loc[short_positions.index], 0.048, 0.025) / 12.0
-            shorting_costs = short_positions * short_fee_rate
+            shorting_costs = pd.Series(0.0, index=all_assets) # 初始化為 0
+            shorting_costs.loc[short_positions.index] = short_positions * short_fee_rate # 這是每一檔股票的 SC Detail
             total_sc = shorting_costs.sum()
 
             # --- 4. 計算原始報酬與淨報酬 ---
             raw_return = (w_target * returns).sum()
             net_return = raw_return - total_tc - total_sc
 
-            # --- 5. 計算月底的漂移權重 (為下個月準備) ---
-            # 月底資產價值變動 = 原始權重 * (1 + 該月報酬)
+            # ================= 新增：儲存本月個股明細 =================
+            # 只儲存「目標有持倉」或「產生了交易換手」的股票，濾掉完全沒動到的股票
+            active_mask = (w_target != 0) | (turnover != 0)
+            active_assets = all_assets[active_mask]
+
+            month_detail = pd.DataFrame({
+                'Date': t_month,
+                'Permno': active_assets,
+                'Weight': w_target.loc[active_assets],
+                'Return': returns.loc[active_assets],
+                'Turnover': turnover.loc[active_assets],
+                'TC_Fee': transaction_costs.loc[active_assets],
+                'SC_Fee': shorting_costs.loc[active_assets],
+                'Is_Microcap': is_microcap.loc[active_assets]
+            })
+            detailed_records.append(month_detail)
+
+            # --- 5. 計算月底的漂移權重 ---
             end_of_month_values = w_target * (1 + returns)
             portfolio_multiplier = 1 + raw_return
-            # 避免除以 0 (若資產歸零)
             if portfolio_multiplier != 0:
                 drifted_weights = end_of_month_values / portfolio_multiplier
             else:
@@ -110,13 +124,25 @@ class BacktestEngine:
             results.append({
                 'Date': t_month,
                 'Raw_Return': raw_return,
-                'Turnover': turnover.sum() / 2, # 單邊換手率
+                'Turnover': turnover.sum() / 2,
                 'TC': total_tc,
                 'SC': total_sc,
                 'Net_Return': net_return
             })
 
+        self.holdings_detail: pd.DataFrame = pd.concat(detailed_records, ignore_index=True)
+
         return pd.DataFrame(results)
+
+    def save_holdings_report(self, save_folder: str):
+        """將每月的持倉與明細匯出成 CSV"""
+        if hasattr(self, 'holdings_detail'):
+            save_path = os.path.join(save_folder, "holdings_detail.csv")
+            self.holdings_detail['Date'] = self.holdings_detail['Date'].astype(str)
+            self.holdings_detail.to_csv(save_path, index=False)
+            print(f"Save holdings detail report to: {save_path}")
+        else:
+            print("尚未執行回測，無法儲存持倉報表。")
 
     @staticmethod
     def calculate_metrics(portfolio_df: pd.DataFrame, save=True, save_path: str = "backtest_metrics.txt", rf_path: str = "fama_french_rf_monthly.parquet") -> typing.Dict[str, str]:

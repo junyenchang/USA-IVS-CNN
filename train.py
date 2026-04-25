@@ -126,6 +126,7 @@ def main():
     try:
         engine = BacktestEngine(df_preds, config.base_fee_bps)
         backtest_results = engine.run_simulation()
+        engine.save_holdings_report(logger.exp_dir)
         engine.calculate_metrics(backtest_results, save=True, save_path=os.path.join(logger.exp_dir, "backtest_metrics.txt"), rf_path=os.path.join(OptionPath.RFrate, "fama_french_rf_monthly.parquet"))
         engine.save_and_plot_performance(backtest_results, os.path.join(OptionPath.Benchmark, 'spy_benchmark_monthly.parquet'), logger.exp_dir)
 
