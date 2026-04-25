@@ -239,3 +239,23 @@ class WRDSClient:
             print(f"SPY 基準資料已儲存至 {file_name}")
         else:
             print("未抓取到 SPY 資料。")
+
+    def fetch_rf_rate(self, output_dir: str, start_year: int=1996, end_year: int=2025):
+        """抓取 Fama-French 的月度無風險利率"""
+        print(f"正在抓取 Fama-French 的月度無風險利率 (RF) 由 {start_year} 至 {end_year}...")
+
+        sql_query = f"""
+            SELECT date, rf
+            FROM ff.factors_monthly
+            WHERE date >= '{start_year}-01-01' AND date <= '{end_year}-12-31'
+        """
+
+        df = self.db.raw_sql(sql_query, date_cols=['date'])
+
+        if not df.empty:
+            file_name = os.path.join(output_dir, 'fama_french_rf_monthly.parquet')
+            df.to_parquet(file_name, engine='pyarrow')
+            print(f"Fama-French 無風險利率資料已儲存至 {file_name}")
+        else:
+            print("未抓取到 Fama-French 無風險利率資料。")
+

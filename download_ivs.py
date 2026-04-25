@@ -15,6 +15,7 @@ def main():
         loader.fetch_and_save_year(year=year, output_dir=OptionPath.IVS)
 
     loader.fetch_spy_benchmark(output_dir=OptionPath.Benchmark, start_year=1996, end_year=2024)
+    loader.fetch_rf_rate(output_dir=OptionPath.RFrate, start_year=1996, end_year=2024)
 
 if __name__ == "__main__":
     main()
