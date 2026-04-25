@@ -119,16 +119,26 @@ class BacktestEngine:
         return pd.DataFrame(results)
 
     @staticmethod
-    def calculate_metrics(portfolio_df: pd.DataFrame, save=True, save_path: str = "backtest_metrics.txt") -> typing.Dict[str, str]:
+    def calculate_metrics(portfolio_df: pd.DataFrame, save=True, save_path: str = "backtest_metrics.txt", rf_path: str = "fama_french_rf_monthly.parquet") -> typing.Dict[str, str]:
         """計算績效指標"""
-        net_ret = portfolio_df['Net_Return']
+        df = portfolio_df.copy()
+        # net_ret = portfolio_df['Net_Return']
+        rf_rate_df = pd.read_parquet(rf_path)
+        df['YearMonth'] = pd.to_datetime(df['Date'].astype(str)).dt.to_period('M')
+        rf_rate_df['YearMonth'] = pd.to_datetime(rf_rate_df['date'].astype(str)).dt.to_period('M')
+        merged = pd.merge(df, rf_rate_df[['YearMonth', 'rf']], on='YearMonth', how='inner')
 
-        annualized_return = net_ret.mean() * 12
-        annualized_vol = net_ret.std() * np.sqrt(12)
-        sharpe_ratio = annualized_return / annualized_vol if annualized_vol != 0 else 0
+        excess_return = merged['Net_Return'] - merged['rf']
+
+        annualized_return = merged['Net_Return'].mean() * 12
+        annualized_vol = merged['Net_Return'].std() * np.sqrt(12)
+
+        annualized_excess_return = excess_return.mean() * 12
+        excess_vol = excess_return.std() * np.sqrt(12)
+        sharpe_ratio = annualized_excess_return / excess_vol if excess_vol != 0 else 0
 
         # Calculate Maximum Drawdown
-        cumulative_return = (1 + net_ret).cumprod()
+        cumulative_return = (1 + merged['Net_Return']).cumprod()
         running_max = cumulative_return.cummax()
         drawdown = (cumulative_return - running_max) / running_max
         max_drawdown = drawdown.min()

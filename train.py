@@ -64,7 +64,7 @@ def main():
     logger = ExperimentLogger(config)
     set_seed()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"開始實驗: {config.exp_name} | 群組: {config.exp_group} | Device: {device}")
+    print(f"--- Start Experiment: {config.exp_name} | Group: {config.exp_group} | Device: {device} ---")
 
     if config.training_strategy == 'standard':
         train_dataset, val_dataset = prepare_datasets(
@@ -84,7 +84,7 @@ def main():
     all_histories = []
 
     for i in range(config.num_ensembles):
-        print(f"\n--- 訓練 Ensemble 模型 {i+1}/{config.num_ensembles} ---")
+        print(f"\n--- Training Ensemble Model {i+1}/{config.num_ensembles} ---")
         start_time = time.time()
 
         model = CNN4()
@@ -107,7 +107,7 @@ def main():
         all_predictions.append(preds)
         end_time = time.time()
         duration_minutes = (end_time - start_time) / 60
-        print(f"實驗完成，總耗時: {duration_minutes:.2f} 分鐘")
+        print(f"Finish experiment. Time: {duration_minutes:.2f} minutes")
 
     logger.save_all_loss_histories(all_histories)
     ensemble_pred = np.mean(all_predictions, axis=0)
@@ -120,13 +120,13 @@ def main():
     })
     logger.save_predictions(df_preds)
 
-    print(f"實驗完成，結果已存入 {logger.exp_dir}")
+    print(f"Finish experiment. Save Result to {logger.exp_dir}")
     time.sleep(2)
-    print("\n--- 開始執行回測模組 ---")
+    print("\n--- Start Backtesting ---")
     try:
         engine = BacktestEngine(df_preds, config.base_fee_bps)
         backtest_results = engine.run_simulation()
-        engine.calculate_metrics(backtest_results, save=True, save_path=os.path.join(logger.exp_dir, "backtest_metrics.txt"))
+        engine.calculate_metrics(backtest_results, save=True, save_path=os.path.join(logger.exp_dir, "backtest_metrics.txt"), rf_path=os.path.join(OptionPath.RFrate, "fama_french_rf_monthly.parquet"))
         engine.save_and_plot_performance(backtest_results, os.path.join(OptionPath.Benchmark, 'spy_benchmark_monthly.parquet'), logger.exp_dir)
 
     except FileNotFoundError as e:
