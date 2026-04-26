@@ -47,6 +47,10 @@ class IVSDataset(Dataset):
         # Vectorized 對接未來的報酬 (Label)
         clean_df['current_month'] = clean_df['opt_date'].dt.to_period('M') # type: ignore
 
+        # 透過 permno (CRSP ID) 只保留 opt_date 等於該月最晚日期的資料，避免 secid 變更但 permno 不變的情況下重複樣本
+        latest_dates = clean_df.groupby(['permno', 'current_month'])['opt_date'].transform('max')
+        clean_df = clean_df[clean_df['opt_date'] == latest_dates]
+
         self.df = pd.merge(
             clean_df,
             unique_returns,
