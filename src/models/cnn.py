@@ -3,14 +3,14 @@ import torch.nn as nn
 
 class CNNBlock(nn.Module):
     """論文中定義的核心構建單元"""
-    def __init__(self, in_channels, out_channels):
+    def __init__(self, in_channels, out_channels, max_pool=True):
         super(CNNBlock, self).__init__()
         # 1. 卷積層 (3x3 filter)，設定 padding=1 以免空間維度縮減過快
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
         # 2. ReLU 啟動函數
         self.relu = nn.ReLU()
         # 3. 2x2 最大池化層
-        self.pool = nn.MaxPool2d(kernel_size=2, ceil_mode=True)  # ceil_mode=True 以確保 odd-sized feature maps 也能被池化
+        self.pool = nn.MaxPool2d(kernel_size=2, ceil_mode=True) if max_pool else nn.Identity()
         # 4. 批次歸一化層
         self.bn = nn.BatchNorm2d(out_channels)
 
@@ -23,15 +23,15 @@ class CNNBlock(nn.Module):
 
 class CNN4(nn.Module):
     """論文中的 CNN4 架構"""
-    def __init__(self):
+    def __init__(self, in_channels: int = 1, max_pool: bool = True):
         super(CNN4, self).__init__()
 
-        # 輸入為 1 個 Channel (IV 曲面)，依序經過 4 個區塊
-        # 濾鏡數量遞增：16 -> 32 -> 64 -> 128
-        self.block1 = CNNBlock(1, 16)
-        self.block2 = CNNBlock(16, 32)
-        self.block3 = CNNBlock(32, 64)
-        self.block4 = CNNBlock(64, 128)
+        # 預設輸入為 1 個 Channel (IV 曲面)，依序經過 4 個區塊
+        # filter 數量遞增：16 -> 32 -> 64 -> 128
+        self.block1 = CNNBlock(in_channels, 16, max_pool=max_pool)
+        self.block2 = CNNBlock(16, 32, max_pool=max_pool)
+        self.block3 = CNNBlock(32, 64, max_pool=max_pool)
+        self.block4 = CNNBlock(64, 128, max_pool=max_pool)
 
         # 全域平均池化 (GAP - Global Average Pooling)
         # AdaptiveAvgPool2d((1, 1)) 會將任何輸入大小的特徵圖平均縮放為 1x1

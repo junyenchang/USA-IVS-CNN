@@ -24,12 +24,13 @@ class BaselineConfig:
     # 控制 IVS 特徵的轉換方式:
     # 'raw' (原樣), 'log' (取對數 log1p), 'clip' (截尾固定上限)
     ivs_transform: str = 'raw'
-    ivs_clip_max: float = 0.8
+    ivs_clip_max: float = 0.9
 
     # ---------------------------------------------------------
     # Model types
     # ---------------------------------------------------------
     model_type: str = "CNN4"
+    max_pool: bool = True
 
     # ---------------------------------------------------------
     # 優化器與訓練超參數 (Optimization & Training)
@@ -40,7 +41,7 @@ class BaselineConfig:
 
     # Early Stopping 設定
     use_early_stopping: bool = True
-    es_patience: int = 10         # 容忍幾個 epoch 驗證集沒有改善
+    es_patience: int = 5         # 容忍幾個 epoch 驗證集沒有改善
     es_min_delta: float = 0.0   # 被判定為有改善的最小變化量: 1e-4
 
     # ---------------------------------------------------------
@@ -58,7 +59,7 @@ class BaselineConfig:
     # ---------------------------------------------------------
     # Ensemble 設定 (Ensembling)
     # ---------------------------------------------------------
-    num_ensembles: int = 10   # 訓練幾個模型來平均預測
+    num_ensembles: int = 40   # 訓練幾個模型來平均預測
 
     # ---------------------------------------------------------
     # Backtesting 設定 (Backtesting)
