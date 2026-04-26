@@ -1,4 +1,5 @@
 import os
+import gc
 import argparse
 import pandas as pd
 import numpy as np
@@ -25,6 +26,7 @@ def parse_args(config: BaselineConfig) -> BaselineConfig:
     parser.add_argument("--learning_rate", type=float, default=None)
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--num_ensembles", type=int, default=None)
+    parser.add_argument("--maxpool", type=bool, default=None)
 
     args = parser.parse_args()
 
@@ -34,7 +36,7 @@ def parse_args(config: BaselineConfig) -> BaselineConfig:
     if args.learning_rate: config.learning_rate = args.learning_rate
     if args.epochs: config.epochs = args.epochs
     if args.num_ensembles: config.num_ensembles = args.num_ensembles
-
+    if args.maxpool: config.max_pool = False # default 是 True，若有傳入參數則改為 False
     return config
 
 def prepare_datasets(config: BaselineConfig, train_start: int, train_end: int, val_start: int, val_end: int):
@@ -47,9 +49,13 @@ def prepare_datasets(config: BaselineConfig, train_start: int, train_end: int, v
         transform_kwargs['std'] = train_dataset.X.std().item()
     elif config.ivs_transform == 'minmax':
         transform_kwargs['min_val'] = train_dataset.X.min().item()
-        transform_kwargs['max_val'] = train_dataset.X.max().item()
+        transform_kwargs['max_val'] = torch.quantile(train_dataset.X, 0.95)
     elif config.ivs_transform == 'clip':
         transform_kwargs['max_val'] = config.ivs_clip_max
+    elif config.ivs_transform == 'rgb':
+        transform_kwargs['min_val'] = train_dataset.X.min().item()
+        transform_kwargs['max_val'] = torch.quantile(train_dataset.X, 0.95)
+        transform_kwargs['cmap_name'] = 'viridis'
 
     ivs_transform_func = get_ivs_transform(config.ivs_transform, **transform_kwargs)
     train_dataset.transform = ivs_transform_func
@@ -79,6 +85,8 @@ def main():
 
     train_loader = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=config.batch_size, shuffle=False)
+    sample_x, _, _, _ = train_dataset[0]
+    input_channels = sample_x.shape[0]
 
     all_predictions = []
     all_histories = []
@@ -87,7 +95,7 @@ def main():
         print(f"\n--- Training Ensemble Model {i+1}/{config.num_ensembles} ---")
         start_time = time.time()
 
-        model = CNN4()
+        model = CNN4(input_channels, config.max_pool)
         criterion = nn.BCEWithLogitsLoss() if config.task_type == "classification" else nn.MSELoss()
         optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
 
@@ -108,6 +116,14 @@ def main():
         end_time = time.time()
         duration_minutes = (end_time - start_time) / 60
         print(f"Finish experiment. Time: {duration_minutes:.2f} minutes")
+
+        trainer = None
+        optimizer = None
+        criterion = None
+        model = None
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     logger.save_all_loss_histories(all_histories)
     ensemble_pred = np.mean(all_predictions, axis=0)
@@ -131,11 +147,11 @@ def main():
         engine.save_and_plot_performance(backtest_results, os.path.join(OptionPath.Benchmark, 'spy_benchmark_monthly.parquet'), logger.exp_dir)
 
     except FileNotFoundError as e:
-        print(f"找不到回測所需的外部檔案，跳過回測。錯誤: {e}")
+        print(f"File for backtesting not found: {e}")
     except Exception as e:
-        print(f"回測模組發生錯誤: {e}")
+        print(f"Backtesting error: {e}")
 
-    print("\n 整個實驗流程全部完成！")
+    print("\n Finish all processes.")
 
 if __name__ == "__main__":
     main()
