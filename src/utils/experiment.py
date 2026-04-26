@@ -12,7 +12,7 @@ class ExperimentLogger:
         self.config = config
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         if config.exp_group:
-            self.exp_dir = os.path.join(config.result_dir, f"{config.exp_group}_{timestamp}", config.exp_name)
+            self.exp_dir = os.path.join(config.result_dir, config.exp_group, f"{config.exp_name}_{timestamp}")
         else:
             self.exp_dir = os.path.join(config.result_dir, f"{config.exp_name}_{timestamp}")
 
