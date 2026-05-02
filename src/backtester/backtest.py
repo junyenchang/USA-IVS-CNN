@@ -25,17 +25,15 @@ class BacktestEngine:
         df['Date'] = pd.to_datetime(df['Date'])
         df['YearMonth'] = df['Date'].dt.to_period('M')
         df = df.sort_values(['YearMonth', 'Date', 'Permno'])
-        df = df.drop_duplicates(subset=['YearMonth', 'Permno'], keep='last') # 每月最後一天的預測值代表該月的持倉決策
+        df = df.drop_duplicates(subset=['YearMonth', 'Permno'], keep='last')
 
         # 2. 分組計算 Quantile 決定 Long/Short 部位 (每月月底)
         def assign_weights(group: pd.DataFrame) -> pd.DataFrame:
-            # 切分 10 組，排除 NaN
             valid_preds = group['Pred'].dropna()
             if len(valid_preds) < 10:
                 group['target_weight'] = 0
                 return group
 
-            # 計算 10% 與 90% 的分位數閾值
             q10 = valid_preds.quantile(0.10)
             q90 = valid_preds.quantile(0.90)
 
@@ -71,7 +69,7 @@ class BacktestEngine:
             # --- 1. 目標權重與實際報酬 ---
             w_target = current_month['target_weight'].fillna(0)
             returns = current_month['Actual'].fillna(0)
-            is_microcap = current_month['is_microcap'].fillna(False)
+            is_microcap = current_month['is_microcap'].fillna(False).astype(bool)
 
             all_assets = w_target.index.union(drifted_weights.index)
             w_target = w_target.reindex(all_assets, fill_value=0.0)
@@ -96,7 +94,6 @@ class BacktestEngine:
             raw_return = (w_target * returns).sum()
             net_return = raw_return - total_tc - total_sc
 
-            # ================= 新增：儲存本月個股明細 =================
             # 只儲存「目標有持倉」或「產生了交易換手」的股票，濾掉完全沒動到的股票
             active_mask = (w_target != 0) | (turnover != 0)
             active_assets = all_assets[active_mask]
@@ -208,7 +205,6 @@ class BacktestEngine:
         merged_df['Strategy_CumRet'] = (1 + merged_df['Net_Return']).cumprod()
         merged_df['SPY_CumRet'] = (1 + merged_df['SPY_Return']).cumprod()
 
-        # === 1. 繪製圖表 ===
         plt.figure(figsize=(10, 6))
         plt.plot(merged_df['Date'], merged_df['Strategy_CumRet'], label='CNN-IVS Strategy', color='red')
         plt.plot(merged_df['Date'], merged_df['SPY_CumRet'], label='SPY Benchmark', color='blue', alpha=0.7)
@@ -220,12 +216,10 @@ class BacktestEngine:
         plt.legend()
         plt.tight_layout()
 
-        # === 2. 儲存圖片 ===
         plot_path = os.path.join(save_folder, "cumulative_performance.png")
         plt.savefig(plot_path, dpi=300)
-        plt.show()
+        plt.close()
 
-        # === 3. 儲存每期報酬紀錄為 CSV ===
         csv_path = os.path.join(save_folder, "backtest_timeseries.csv")
         merged_df.drop(columns=['YearMonth']).to_csv(csv_path, index=False)
 
