@@ -3,7 +3,7 @@ import torch.nn as nn
 
 class CNNBlock(nn.Module):
     """論文中定義的核心構建單元"""
-    def __init__(self, in_channels, out_channels, max_pool=True):
+    def __init__(self, in_channels: int, out_channels: int, max_pool=True):
         super(CNNBlock, self).__init__()
         # 1. 卷積層 (3x3 filter)，padding=1 以免空間維度縮減過快
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
@@ -14,7 +14,7 @@ class CNNBlock(nn.Module):
         # 4. 批次歸一化層
         self.bn = nn.BatchNorm2d(out_channels)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.conv(x)
         x = self.relu(x)
         x = self.pool(x)
