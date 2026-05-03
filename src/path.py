@@ -12,6 +12,7 @@ class OptionPath:
     ROOT: str = os.path.join(DB_ROOT, "OptionDB")
 
     IVS: str = os.path.join(ROOT, "USA_IVS")
+    IVS_ALL: str = os.path.join(ROOT, "USA_IVS_ALL")
     Benchmark: str = os.path.join(ROOT, "SPY_Benchmark")
     StockInfo: str = os.path.join(ROOT, "Stock_Info")
     RFrate: str = os.path.join(ROOT, "RF_Rate")
@@ -19,7 +20,7 @@ class OptionPath:
     @classmethod
     def ensure_dirs(cls) -> None:
         """確保所有必要資料夾存在。"""
-        for path in [cls.ROOT, cls.IVS, cls.Benchmark, cls.StockInfo, cls.RFrate]:
+        for path in [cls.ROOT, cls.IVS, cls.IVS_ALL, cls.Benchmark, cls.StockInfo, cls.RFrate]:
             os.makedirs(path, exist_ok=True)
 
 class ResultsPath:
