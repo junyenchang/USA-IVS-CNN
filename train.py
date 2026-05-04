@@ -18,32 +18,35 @@ from src.data.dataset import IVSDataset
 from src.data.transforms import get_ivs_transform
 from src.backtester.backtest import BacktestEngine
 from src.utils.seed import set_seed
+pd.set_option('future.no_silent_downcasting', True)
 
 def parse_args(config: BaselineConfig) -> BaselineConfig:
     parser = argparse.ArgumentParser(description="IVS CNN Training")
     parser.add_argument("--exp_group", type=str, default=None, help="實驗主資料夾名稱")
     parser.add_argument("--exp_name", type=str, default=None, help="實驗名稱 (子資料夾)")
+    parser.add_argument("--task_type", type=str, default=None, help="任務類型 (regression/classification)")
+    parser.add_argument("--jump_threshold", type=float, default=None, help="classification 任務中 jump 的定義閾值")
     parser.add_argument("--model_type", type=str, default=None, help="模型類型 (CNN1/CNN4/CNN5)")
     parser.add_argument("--ivs_transform", type=str, default=None, help="IVS 特徵轉換方式 (raw/log/clip...)")
     parser.add_argument("--learning_rate", type=float, default=None)
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--num_ensembles", type=int, default=None)
-    parser.add_argument("--maxpool", type=bool, default=None)
     parser.add_argument("--training_strategy", type=str, default=None, help="訓練機制 (standard/expanding/rolling_finetune)")
     parser.add_argument("--step_months", type=int, default=None, help="時間窗推進的步長 (月數)")
 
     args = parser.parse_args()
 
-    if args.exp_group: config.exp_group = args.exp_group
-    if args.exp_name: config.exp_name = args.exp_name
-    if args.model_type: config.model_type = args.model_type
-    if args.ivs_transform: config.ivs_transform = args.ivs_transform
-    if args.learning_rate: config.learning_rate = args.learning_rate
-    if args.epochs: config.epochs = args.epochs
-    if args.num_ensembles: config.num_ensembles = args.num_ensembles
-    if args.maxpool: config.max_pool = False # default 是 True，若有傳入參數則改為 False
-    if args.training_strategy: config.training_strategy = args.training_strategy
-    if args.step_months: config.step_months = args.step_months
+    if args.exp_group is not None: config.exp_group = args.exp_group
+    if args.exp_name is not None: config.exp_name = args.exp_name
+    if args.model_type is not None: config.model_type = args.model_type
+    if args.ivs_transform is not None: config.ivs_transform = args.ivs_transform
+    if args.learning_rate is not None: config.learning_rate = args.learning_rate
+    if args.epochs is not None: config.epochs = args.epochs
+    if args.num_ensembles is not None: config.num_ensembles = args.num_ensembles
+    if args.training_strategy is not None: config.training_strategy = args.training_strategy
+    if args.step_months is not None: config.step_months = args.step_months
+    if args.task_type is not None: config.task_type = args.task_type
+    if args.jump_threshold is not None: config.jump_threshold = args.jump_threshold
     return config
 
 def prepare_datasets(config: BaselineConfig, train_start: int, train_end: int, val_start: int, val_end: int):
@@ -142,7 +145,7 @@ def main():
             criterion = nn.BCEWithLogitsLoss() if config.task_type == "classification" else nn.MSELoss()
             optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
 
-            trainer = Trainer(model, optimizer, criterion, config.task_type, device)
+            trainer = Trainer(model, optimizer, criterion, config.task_type, device, config.jump_threshold)
 
             early_stopping = None
             if config.use_early_stopping:
@@ -216,7 +219,7 @@ def main():
             model = get_model(config.model_type, input_channels, config.max_pool)
             criterion = nn.BCEWithLogitsLoss() if config.task_type == "classification" else nn.MSELoss()
             optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
-            trainer = Trainer(model, optimizer, criterion, config.task_type, device)
+            trainer = Trainer(model, optimizer, criterion, config.task_type, device, config.jump_threshold)
             trainer.fit(warm_loader, warm_loader, epochs=config.warm_up_epochs)
 
             model_states.append({'model': model, 'optimizer': optimizer, 'trainer': trainer})
@@ -298,7 +301,7 @@ def main():
     time.sleep(2)
     print("\n--- Start Backtesting ---")
     try:
-        engine = BacktestEngine(df_preds, config.base_fee_bps)
+        engine = BacktestEngine(df_preds, config.base_fee_bps, task_type=config.task_type, jump_threshold=config.jump_threshold)
         backtest_results = engine.run_simulation()
         engine.save_holdings_report(logger.exp_dir)
         engine.calculate_metrics(backtest_results, save=True, save_path=os.path.join(logger.exp_dir, "backtest_metrics.txt"), rf_path=os.path.join(OptionPath.RFrate, "fama_french_rf_monthly.parquet"))

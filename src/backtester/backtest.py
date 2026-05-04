@@ -7,13 +7,17 @@ import numpy as np
 from src.path import OptionPath
 
 class BacktestEngine:
-    def __init__(self, preds_df: pd.DataFrame, base_fee_bps: int = 10):
+    def __init__(self, preds_df: pd.DataFrame, base_fee_bps: int = 10, task_type: str = "regression", jump_threshold: float = 0.0):
         """
         Args:
             preds_df: 模型輸出的 ensemble_predictions.csv
             base_fee_bps: 基礎手續費 (例如 10 bps = 0.001)
+            task_type: 任務類型 (regression/classification)
+            jump_threshold: classification 任務中的跳躍閾值
         """
         self.base_fee = base_fee_bps / 10000.0
+        self.task_type = task_type
+        self.jump_threshold = jump_threshold
         market_df = pd.read_parquet(os.path.join(OptionPath.StockInfo, 'market_metadata.parquet'))
         self.df = self._prepare_data(preds_df, market_df)
 
@@ -38,8 +42,15 @@ class BacktestEngine:
             q90 = valid_preds.quantile(0.90)
 
             # 給予權重 (假設 Equal Weight，多空各 100% 資金)
-            long_cond = group['Pred'] >= q90
-            short_cond = group['Pred'] <= q10
+            if self.task_type == "classification" and self.jump_threshold < 0:
+                # 預測大於負向 jump 跌幅的機率時：機率越高代表越可能大跌
+                # 買入 (Long) 機率最低的群組，做空 (Short) 機率最高的群組
+                long_cond = group['Pred'] <= q10
+                short_cond = group['Pred'] >= q90
+            else:
+                # 原 Regression 或正向 Jump 等預設邏輯
+                long_cond = group['Pred'] >= q90
+                short_cond = group['Pred'] <= q10
 
             n_long = long_cond.sum()
             n_short = short_cond.sum()

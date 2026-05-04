@@ -10,10 +10,10 @@ class BaselineConfig:
 
     exp_group: str = ''
     exp_name: str = "CNN4_Baseline"
-    task_type: str = "regression" # 或 'classification'
+    task_type: str = "regression" # or 'classification'
 
-    # 若為 classification，在此設定大跌的定義閾值 (如預測下個月回報 <= -15%)
-    crash_threshold: float = -0.15
+    # 若為 classification，在此設定跳躍的定義閾值 (如預測下個月回報 <= -15%)
+    jump_threshold: float = -0.15
 
     # ---------------------------------------------------------
     # 資料集與前處理控制 (Dataset & Preprocessing)

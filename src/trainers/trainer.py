@@ -31,12 +31,13 @@ class EarlyStopping:
                 self.early_stop = True
 
 class Trainer:
-    def __init__(self, model: nn.Module, optimizer: torch.optim.Optimizer, criterion: nn.Module, task_type: str, device: torch.device):
+    def __init__(self, model: nn.Module, optimizer: torch.optim.Optimizer, criterion: nn.Module, task_type: str, device: torch.device, jump_threshold: float = 0.0):
         self.model = model
         self.optimizer = optimizer
         self.criterion = criterion
         self.task_type = task_type
         self.device = device
+        self.jump_threshold = jump_threshold
         self.model.to(self.device)
 
     def train_epoch(self, dataloader: torch.utils.data.DataLoader):
@@ -49,6 +50,13 @@ class Trainer:
             X_batch: torch.Tensor = batch_data[0].to(self.device)
             y_batch: torch.Tensor = batch_data[1].to(self.device)
             batch_size: int = X_batch.size(0)
+
+            # 分類任務轉標籤
+            if self.task_type == "classification" and self.jump_threshold != 0:
+                if self.jump_threshold < 0:
+                    y_batch = (y_batch <= self.jump_threshold).float()
+                else:
+                    y_batch = (y_batch >= self.jump_threshold).float()
 
             self.optimizer.zero_grad() # 1. 清空梯度
 
@@ -77,9 +85,16 @@ class Trainer:
 
         with torch.no_grad(): # 評估時不需要計算梯度，節省記憶體
             for batch_data in dataloader:
-                X_batch = batch_data[0].to(self.device)
-                y_batch = batch_data[1].to(self.device)
+                X_batch: torch.Tensor = batch_data[0].to(self.device)
+                y_batch: torch.Tensor = batch_data[1].to(self.device)
                 batch_size: int = X_batch.size(0)
+
+                # 分類任務轉標籤
+                if self.task_type == "classification" and self.jump_threshold != 0:
+                    if self.jump_threshold < 0:
+                        y_batch = (y_batch <= self.jump_threshold).float()
+                    else:
+                        y_batch = (y_batch >= self.jump_threshold).float()
 
                 predictions: torch.Tensor = self.model(X_batch).squeeze(-1)
                 loss: torch.Tensor = self.criterion(predictions, y_batch)
@@ -112,8 +127,7 @@ class Trainer:
             self.model.load_state_dict(early_stopping.best_weights)
         return history
 
-    def predict(self, dataloader: torch.utils.data.DataLoader):
-        """新增的預測方法，回傳預測值與真實值"""
+    def predict(self, dataloader: torch.utils.data.DataLoader) -> typing.Tuple[typing.List[float], typing.List[float], typing.List[str], typing.List[int]]:
         self.model.eval()
         all_preds: typing.List[float] = []
         all_targets: typing.List[float] = []
