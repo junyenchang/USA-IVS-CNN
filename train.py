@@ -143,7 +143,7 @@ def main():
 
             model = get_model(config.model_type, input_channels, config.max_pool)
             criterion = nn.BCEWithLogitsLoss() if config.task_type == "classification" else nn.MSELoss()
-            optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
+            optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate, weight_decay=config.l2_lambda)
 
             trainer = Trainer(model, optimizer, criterion, config.task_type, device, config.jump_threshold)
 
@@ -198,12 +198,14 @@ def main():
         print(f"Train start date: {train_start_date}")
         print(f"Warm-up end date: {warm_end_date}")
 
-        # 第一階段：Warm-up 初始化
-        warm_train_subset = manager.get_split(train_start_date, warm_end_date)
-        if len(warm_train_subset) == 0:
+        # Use the raw warm-up subset to fit the transform and cache it in the manager, then get the transformed warm-up subset for training
+        raw_warm_up_subset = manager.get_split(train_start_date, warm_end_date)
+        if len(raw_warm_up_subset) == 0:
             raise ValueError("Warm-up dataset is empty. Check your start_year and warm_up_years.")
+        manager.transform = get_transform_func(config, raw_warm_up_subset.X)
 
-        manager.transform = get_transform_func(config, warm_train_subset.X)
+        # Get the warm-up subset again with the transform applied
+        warm_train_subset = manager.get_split(train_start_date, warm_end_date)
         warm_loader = DataLoader(warm_train_subset, batch_size=config.batch_size, shuffle=True)
 
         sample_x, _, _, _ = warm_train_subset[0]
@@ -218,9 +220,9 @@ def main():
             set_seed(current_seed)
             model = get_model(config.model_type, input_channels, config.max_pool)
             criterion = nn.BCEWithLogitsLoss() if config.task_type == "classification" else nn.MSELoss()
-            optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
+            optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate, weight_decay=config.l2_lambda)
             trainer = Trainer(model, optimizer, criterion, config.task_type, device, config.jump_threshold)
-            trainer.fit(warm_loader, warm_loader, epochs=config.warm_up_epochs)
+            trainer.fit(warm_loader, warm_loader, epochs=config.warm_up_epochs) # We don't need to early stop during warm-up, so we can pass the same loader for train and val
 
             model_states.append({'model': model, 'optimizer': optimizer, 'trainer': trainer})
 
@@ -253,6 +255,8 @@ def main():
 
             for state in model_states:
                 trainer: Trainer = state['trainer']
+                # for param_group in trainer.optimizer.param_groups:
+                #     param_group['lr'] = config.learning_rate * 0.1
                 preds, actuals, dates, permnos = trainer.predict(test_loader)
                 window_preds_list.append(preds)
                 if window_actuals is None:
@@ -277,7 +281,7 @@ def main():
             print(f"Fine-tuning {len(model_states)} models from {finetune_start.strftime('%Y-%m')} to {test_end.strftime('%Y-%m')}")
             for state in model_states:
                 trainer: Trainer = state['trainer']
-                trainer.fit(finetune_loader, finetune_loader, epochs=config.transfer_epochs)
+                trainer.fit(finetune_loader, finetune_loader, epochs=config.transfer_epochs) # Don't need early stopping during fine-tuning too
 
             current_end = test_end
 
