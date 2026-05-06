@@ -314,7 +314,8 @@ def main():
     time.sleep(2)
     print("\n--- Start Backtesting ---")
     try:
-        engine = BacktestEngine(df_preds, config.base_fee_bps, task_type=config.task_type, jump_threshold=config.jump_threshold)
+        stock_info_dir = OptionPath.StockInfo_All if config.dataset_type == "USA_IVS_ALL" else OptionPath.StockInfo
+        engine = BacktestEngine(df_preds, stock_info_dir, config.base_fee_bps, task_type=config.task_type, jump_threshold=config.jump_threshold)
         backtest_results = engine.run_simulation()
         engine.save_holdings_report(logger.exp_dir)
         engine.calculate_metrics(backtest_results, save=True, save_path=os.path.join(logger.exp_dir, "backtest_metrics.txt"), rf_path=os.path.join(OptionPath.RFrate, "fama_french_rf_monthly.parquet"))

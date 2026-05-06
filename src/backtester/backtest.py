@@ -7,10 +7,11 @@ import numpy as np
 from src.path import OptionPath
 
 class BacktestEngine:
-    def __init__(self, preds_df: pd.DataFrame, base_fee_bps: int = 10, task_type: str = "regression", jump_threshold: float = 0.0):
+    def __init__(self, preds_df: pd.DataFrame, stock_info_dir: str, base_fee_bps: int = 10, task_type: str = "regression", jump_threshold: float = 0.0):
         """
         Args:
             preds_df: 模型輸出的 ensemble_predictions.csv
+            stock_info_dir: 股票資訊資料夾路徑
             base_fee_bps: 基礎手續費 (例如 10 bps = 0.001)
             task_type: 任務類型 (regression/classification)
             jump_threshold: classification 任務中的跳躍閾值
@@ -18,7 +19,7 @@ class BacktestEngine:
         self.base_fee = base_fee_bps / 10000.0
         self.task_type = task_type
         self.jump_threshold = jump_threshold
-        market_df = pd.read_parquet(os.path.join(OptionPath.StockInfo, 'market_metadata.parquet'))
+        market_df = pd.read_parquet(os.path.join(stock_info_dir, 'market_metadata.parquet'))
         self.df = self._prepare_data(preds_df, market_df)
 
     def _prepare_data(self, preds_df: pd.DataFrame, market_data_df: pd.DataFrame) -> pd.DataFrame:
