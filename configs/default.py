@@ -5,8 +5,17 @@ from dataclasses import dataclass, field
 @dataclass
 class BaselineConfig:
     project_root: str = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-    data_dir: str = os.path.join(OptionPath.IVS)
+    dataset_type: str = "USA" # "USA" or "USA_ALL"
+    data_dir: str = field(init=False)
     result_dir: str = os.path.join(ResultsPath.CNN)
+
+    def __post_init__(self):
+        if self.dataset_type == "USA":
+            self.data_dir = OptionPath.IVS
+        elif self.dataset_type == "USA_ALL":
+            self.data_dir = OptionPath.IVS_ALL
+        else:
+            raise ValueError(f"Unknown dataset_type: {self.dataset_type}")
 
     exp_group: str = ''
     exp_name: str = "CNN4_Baseline"
@@ -39,6 +48,7 @@ class BaselineConfig:
     random_seed: int = 42
     batch_size: int = 512
     learning_rate: float = 1e-3
+    l2_lambda: float = 1e-4
     epochs: int = 100
 
     # Early Stopping 設定
