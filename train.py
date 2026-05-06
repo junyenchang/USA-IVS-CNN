@@ -22,6 +22,9 @@ pd.set_option('future.no_silent_downcasting', True)
 
 def parse_args(config: BaselineConfig) -> BaselineConfig:
     parser = argparse.ArgumentParser(description="IVS CNN Training")
+    parser.add_argument("--dataset_type", type=str, default=None, help="資料集類型 (USA_IVS/USA_IVS_ALL)")
+    parser.add_argument("--start_year", type=int, default=None, help="訓練資料的起始年份")
+    parser.add_argument("--standard_train_end_year", type=int, default=None, help="standard 訓練策略中訓練資料的結束年份")
     parser.add_argument("--exp_group", type=str, default=None, help="實驗主資料夾名稱")
     parser.add_argument("--exp_name", type=str, default=None, help="實驗名稱 (子資料夾)")
     parser.add_argument("--task_type", type=str, default=None, help="任務類型 (regression/classification)")
@@ -47,6 +50,12 @@ def parse_args(config: BaselineConfig) -> BaselineConfig:
     if args.step_months is not None: config.step_months = args.step_months
     if args.task_type is not None: config.task_type = args.task_type
     if args.jump_threshold is not None: config.jump_threshold = args.jump_threshold
+    if args.start_year is not None: config.start_year = args.start_year
+    if args.standard_train_end_year is not None: config.standard_train_end_year = args.standard_train_end_year
+    if args.dataset_type is not None:
+        config.dataset_type = args.dataset_type
+        config.__post_init__() # re-initialize data_dir based on dataset_type
+
     return config
 
 def prepare_datasets(config: BaselineConfig, train_start: int, train_end: int, val_start: int, val_end: int):
