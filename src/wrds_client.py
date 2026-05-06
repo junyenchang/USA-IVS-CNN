@@ -150,13 +150,13 @@ class WRDSClient:
             ON date_trunc('month', f.date) = bkp.month_start
         """
 
-    def _build_sql_query_all_assets(self, year: int) -> str:
-        """建立指定年份的 SQL 查詢字串，不限制股票屬性及交易所"""
+    def _build_sql_query_all_assets(self, year: int, start_date: str, end_date: str) -> str:
+        """建立指定年份與日期區間的 SQL 查詢字串，不限制股票屬性及交易所"""
         return f"""
         WITH eom_dates AS (
             SELECT secid, date_trunc('month', date) AS month_start, MAX(date) AS eom_date
             FROM optionm.vsurfd{year}
-            WHERE date >= '{year}-01-01' AND date <= '{year}-12-31'
+            WHERE date >= '{start_date}' AND date <= '{end_date}'
             GROUP BY secid, date_trunc('month', date)
         ),
         filtered_ivs AS (
@@ -186,10 +186,10 @@ class WRDSClient:
             FROM valid_link AS vl
             INNER JOIN crsp.msenames n
                 ON vl.permno = n.permno
-                AND n.namedt <= '{year}-12-31'
-                AND n.nameendt >= '{year}-01-01'
-            WHERE vl.sdate <= '{year}-12-31'
-            AND (vl.edate >= '{year}-01-01' OR vl.edate IS NULL)
+                AND n.namedt <= '{end_date}'
+                AND n.nameendt >= '{start_date}'
+            WHERE vl.sdate <= '{end_date}'
+            AND (vl.edate >= '{start_date}' OR vl.edate IS NULL)
             -- 移除普通股及交易所限制
         ),
         daily_returns AS (
@@ -199,7 +199,7 @@ class WRDSClient:
             FROM crsp.dsf d
             LEFT JOIN crsp.dsedelist dl
                 ON d.permno = dl.permno AND d.date = dl.dlstdt
-            WHERE d.date >= '{year}-01-01' AND d.date <= '{year}-12-31'
+            WHERE d.date >= '{start_date}' AND d.date <= '{end_date}'
         ),
         monthly_accumulated AS (
             SELECT permno,
@@ -220,7 +220,7 @@ class WRDSClient:
             LEFT JOIN crsp.msenames n
                 ON m.permno = n.permno
                 AND m.date >= n.namedt AND m.date <= n.nameendt
-            WHERE m.date >= '{year}-01-01' AND m.date <= '{year}-12-31'
+            WHERE m.date >= '{start_date}' AND m.date <= '{end_date}'
             AND m.prc IS NOT NULL AND m.shrout IS NOT NULL
             -- 移除普通股及交易所限制
         ),
@@ -352,53 +352,123 @@ class WRDSClient:
 
     def fetch_and_save_year_all_assets(self, year: int, output_dir: str) -> None:
         """抓取指定年份的所有資產資料並儲存為 Parquet, 不做產業與交易所過濾"""
-        print(f"正在抓取 {year} 年所有資產的資料 (無限制)...")
         start_time = time.time()
-        sql_query = self._build_sql_query_all_assets(year)
-        max_retries = 5
 
-        for attempt in range(max_retries):
-            try:
-                print(f"正在執行 SQL 查詢與雲端運算... (第 {attempt + 1} 次嘗試)")
-                query_start = time.time()
-                df = self.db.raw_sql(sql_query, date_cols=['opt_date', 'crsp_date'])
-                print(f"SQL 查詢完成 耗時: {time.time() - query_start:.2f} 秒。共抓取 {len(df)} 筆資料。")
+        if year >= 2021:
+            print(f"[{year} 年] 進入大資料年份，自動拆分為半年分別抓取...")
+            segments = [
+                (f"{year}-01-01", f"{year}-06-30"),
+                (f"{year}-07-01", f"{year}-12-31")
+            ]
+        else:
+            print(f"正在抓取 {year} 年所有資產的資料 (無限制)...")
+            segments = [(f"{year}-01-01", f"{year}-12-31")]
 
-                if not df.empty:
-                    print("正在進行資料型別壓縮...")
-                    df = self._optimize_dataframe(df)
+        max_retries = 3
+        df_list = []
 
-                    file_name = os.path.join(output_dir, f'option_ivs_crsp_all_assets_{year}.parquet')
-                    df.to_parquet(file_name, engine='pyarrow')
+        for start_date, end_date in segments:
+            success = False
+            for attempt in range(max_retries):
+                try:
+                    print(f"執行 SQL 查詢 ({start_date} 至 {end_date}) ... (第 {attempt + 1} 次嘗試)")
+                    sql_query = self._build_sql_query_all_assets(year, start_date, end_date)
+                    query_start = time.time()
 
-                    total_time = time.time() - start_time
-                    file_size_mb = os.path.getsize(file_name) / (1024 * 1024)
+                    df_chunk = self.db.raw_sql(sql_query, date_cols=['opt_date', 'crsp_date'])
+                    print(f"區間查詢完成 耗時: {time.time() - query_start:.2f} 秒。共抓取 {len(df_chunk)} 筆資料。")
 
-                    print("-" * 40)
-                    print(f"▶ 總結 {year} 年: 耗時 {total_time/60 :.2f} 分鐘 | {len(df):,} 筆 | {file_size_mb:.2f} MB")
-                    print("-" * 40)
-                else:
-                    print(f"測試區間 {year} 內沒有抓取到符合條件的資料。")
+                    if not df_chunk.empty:
+                        df_list.append(df_chunk)
 
-                break
+                    success = True
+                    break
 
-            except Exception as e:
-                print(f"抓取 {year} 年資料時發生錯誤: {e}")
-                if attempt < max_retries - 1:
-                    print("嘗試重置 WRDS 連線並重新抓取...")
-                    try:
-                        self.db.close()
-                    except:
-                        pass
+                except Exception as e:
+                    error_msg = str(e).lower()
+                    print(f"抓取區間 {start_date} ~ {end_date} 發生錯誤: {e}")
 
-                    time.sleep(5)
-                    try:
-                        self.db = wrds.Connection(wrds_username=self.username)
-                        print("WRDS 連線已成功重置")
-                    except Exception as re_e:
-                        print(f"重置連線失敗，請檢查網路狀態: {re_e}")
-                else:
-                    print(f"已達到最大重試次數 ({max_retries})，放棄抓取 {year} 年資料。")
+                    if "timed out" in error_msg and start_date == f"{year}-01-01" and end_date == f"{year}-12-31":
+                        print("檢測到 Timeout 超時，切換為每半年抓取策略...")
+                        segments = [
+                            (f"{year}-01-01", f"{year}-06-30"),
+                            (f"{year}-07-01", f"{year}-12-31")
+                        ]
+                        df_list = []
+                        # Recursively call with the new segments by simulating a re-run logic
+                        # But since we are inside segments loop, changing segments list while iterating is tricky.
+                        # For simplicity, we can let it fail the current loop and we should ideally handle it outside.
+
+                    # Alternative to nested loops for retry: just re-assign and break outer loop?
+                    # Since we modify it in place, it's better to break and restart. But let's keep it simple:
+                    if "timed out" in error_msg and start_date == f"{year}-01-01" and end_date == f"{year}-12-31":
+                        break # Let's handle the downgrade logic slightly cleaner
+
+                    if attempt < max_retries - 1:
+                        print("重置連線中...")
+                        try:
+                            self.db.close()
+                        except: pass
+                        time.sleep(5)
+                        try:
+                            self.db = wrds.Connection(wrds_username=self.username)
+                        except: pass
+                    else:
+                        print(f"區間 {start_date} ~ {end_date} 達最大重試次數，放棄。")
+
+            if not success and start_date == f"{year}-01-01" and end_date == f"{year}-12-31" and len(segments) == 1:
+                # Fallback to half-year logic and run loops manually
+                print("每半年抓取一次...")
+                df_list = []
+                segments = [
+                    (f"{year}-01-01", f"{year}-06-30"),
+                    (f"{year}-07-01", f"{year}-12-31")
+                ]
+                for sd, ed in segments:
+                    sub_success = False
+                    for sub_attempt in range(max_retries):
+                        try:
+                            print(f"執行 SQL 查詢 ({sd} 至 {ed}) ... (第 {sub_attempt + 1} 次嘗試)")
+                            sql_query = self._build_sql_query_all_assets(year, sd, ed)
+                            query_start = time.time()
+                            df_chunk = self.db.raw_sql(sql_query, date_cols=['opt_date', 'crsp_date'])
+                            print(f"區間查詢完成 耗時: {time.time() - query_start:.2f} 秒。共抓取 {len(df_chunk)} 筆資料。")
+                            if not df_chunk.empty: df_list.append(df_chunk)
+                            sub_success = True
+                            break
+                        except Exception as sub_e:
+                            print(f"抓取區間 {sd} ~ {ed} 發生錯誤: {sub_e}")
+                            if sub_attempt < max_retries - 1:
+                                try: self.db.close()
+                                except: pass
+                                time.sleep(5)
+                                try: self.db = wrds.Connection(wrds_username=self.username)
+                                except: pass
+                    if not sub_success:
+                        print(f"區間資料抓取失敗，中止 {year} 抓取進度")
+                        return
+                success = True
+
+            if not success:
+                 print(f"區間資料抓取失敗，中止 {year} 抓取進度")
+                 return
+
+        if df_list:
+            print("正在合併與進行資料型別壓縮...")
+            final_df = pd.concat(df_list, ignore_index=True)
+            final_df = self._optimize_dataframe(final_df)
+
+            file_name = os.path.join(output_dir, f'option_ivs_crsp_{year}.parquet')
+            final_df.to_parquet(file_name, engine='pyarrow')
+
+            total_time = time.time() - start_time
+            file_size_mb = os.path.getsize(file_name) / (1024 * 1024)
+
+            print("-" * 40)
+            print(f"▶ 總結 {year} 年: 耗時 {total_time/60 :.2f} 分鐘 | {len(final_df):,} 筆 | {file_size_mb:.2f} MB")
+            print("-" * 40)
+        else:
+            print(f"測試區間 {year} 內沒有抓取到符合條件的資料。")
 
     def fetch_spy_benchmark(self, output_dir: str, start_year: int=1996, end_year: int=2025):
         """抓取 SPY ETF 作為回測基準 (月報酬率)"""
