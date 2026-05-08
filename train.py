@@ -242,14 +242,13 @@ def main():
 
         while current_end < global_end_date:
             test_start = current_end + pd.Timedelta(days=1)
-            test_end = current_end + pd.DateOffset(months=config.step_months)
+            test_end = current_end + pd.offsets.MonthEnd(config.step_months)
 
             if test_end > global_end_date:
                 test_end = global_end_date
 
-            print(f"\n--- Inference & Finetune window: {test_start.strftime('%Y-%m')} to {test_end.strftime('%Y-%m')} ---")
+            print(f"\n--- Inference window: {test_start.strftime('%Y-%m')} to {test_end.strftime('%Y-%m')} ---")
 
-            # 1. 對未來週期 (T+1) 進行「嚴格隔絕」的 Inference
             test_subset = manager.get_split(test_start, test_end)
             if len(test_subset) == 0:
                 current_end = test_end
@@ -281,13 +280,30 @@ def main():
                 'Actual': window_actuals
             }))
 
-            # 2. 獲取 T+1 的 Ground Truth 後，微調權重 (Fine-tune)
-            # 確保不會接觸到 test_end 以後的資料
-            finetune_start = train_start_date if config.training_strategy == 'expanding' else test_start
-            finetune_subset = manager.get_split(finetune_start, test_end)
+            # 微調權重 (Fine-tune)
+            # 需要留緩衝，ex: 使用一月底資料預測二月報酬後，由於二月報酬在二月底才會知道
+            # 因此一月底預測完不能馬上將該月資料加入訓練，必須等到二月底才將一月資料加入訓練
+            safe_finetune_end = test_start - pd.Timedelta(days=1)
+
+            if config.training_strategy == 'expanding':
+                finetune_start = train_start_date # start from beginning for expanding window
+            else: # rolling_finetune
+                if config.rolling_lookback_months > 0: # fine tune with a recent lookback months
+                    finetune_start = safe_finetune_end - pd.offsets.MonthEnd(config.rolling_lookback_months) + pd.Timedelta(days=1)
+                    if finetune_start < train_start_date:
+                        finetune_start = train_start_date
+                else:
+                    finetune_start = safe_finetune_end - pd.offsets.MonthEnd(config.step_months) + pd.Timedelta(days=1) # only fine tune with the new month data
+
+            if safe_finetune_end <= warm_end_date:
+                # 第一圈：尚未有新的可用歷史，跳過更新
+                current_end = test_end
+                continue
+
+            finetune_subset = manager.get_split(finetune_start, safe_finetune_end)
             finetune_loader = DataLoader(finetune_subset, batch_size=config.batch_size, shuffle=True)
 
-            print(f"Fine-tuning {len(model_states)} models from {finetune_start.strftime('%Y-%m')} to {test_end.strftime('%Y-%m')}")
+            print(f"Fine-tuning {len(model_states)} models from {finetune_start.strftime('%Y-%m')} to {safe_finetune_end.strftime('%Y-%m')}")
             for state in model_states:
                 trainer: Trainer = state['trainer']
                 trainer.fit(finetune_loader, finetune_loader, epochs=config.transfer_epochs) # Don't need early stopping during fine-tuning too
