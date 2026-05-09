@@ -27,7 +27,7 @@ class BaselineConfig:
     # ---------------------------------------------------------
     # 資料集與前處理控制 (Dataset & Preprocessing)
     # ---------------------------------------------------------
-    start_year: int = 1998
+    start_year: int = 1996
     standard_train_end_year: int = 2018
     val_end_year: int = 2023
 
@@ -62,18 +62,19 @@ class BaselineConfig:
     # 'standard'  : 一次性切分 Train/Val/Test
     # 'expanding' : 論文中的 Expanding window，先以 warm_up_years 起步，逐年/月加入新資料微調
     # 'rolling_finetune' : 僅使用最新往前推一定時間的資料微調
-    training_strategy: str = 'standard'
+    training_strategy: str = 'rolling_finetune'
 
     # 針對 Expanding / Rolling Strategy 的專屬設定
     warm_up_years: int = 7     # 起始熱身期使用的年份總數 (ex: 1998~2004)
     warm_up_epochs: int = 10   # 熱身期資料的初始訓練 epochs
     transfer_epochs: int = 5   # 每推移一個月/年，新資料加入後微調的 epochs
-    step_months: int = 12       # 每次推進的步長 (1=逐月, 12=逐年)
+    step_months: int = 1       # 每次推進的步長 (1=逐月, 12=逐年)
+    rolling_lookback_months: int = 60 # 針對 rolling_finetune，往回看的歷史資料長度，0 表示僅使用新資料
 
     # ---------------------------------------------------------
     # Ensemble 設定 (Ensembling)
     # ---------------------------------------------------------
-    num_ensembles: int = 40   # 訓練幾個模型來平均預測
+    num_ensembles: int = 1   # 訓練幾個模型來平均預測
 
     # ---------------------------------------------------------
     # Backtesting 設定 (Backtesting)

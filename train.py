@@ -22,7 +22,7 @@ pd.set_option('future.no_silent_downcasting', True)
 
 def parse_args(config: BaselineConfig) -> BaselineConfig:
     parser = argparse.ArgumentParser(description="IVS CNN Training")
-    parser.add_argument("--dataset_type", type=str, default=None, help="資料集類型 (USA_IVS/USA_IVS_ALL)")
+    parser.add_argument("--dataset_type", type=str, default=None, help="資料集類型 (USA/USA_ALL)")
     parser.add_argument("--start_year", type=int, default=None, help="訓練資料的起始年份")
     parser.add_argument("--standard_train_end_year", type=int, default=None, help="standard 訓練策略中訓練資料的結束年份")
     parser.add_argument("--exp_group", type=str, default=None, help="實驗主資料夾名稱")
@@ -36,6 +36,7 @@ def parse_args(config: BaselineConfig) -> BaselineConfig:
     parser.add_argument("--num_ensembles", type=int, default=None)
     parser.add_argument("--training_strategy", type=str, default=None, help="訓練機制 (standard/expanding/rolling_finetune)")
     parser.add_argument("--step_months", type=int, default=None, help="時間窗推進的步長 (月數)")
+    parser.add_argument("--lookback_months", type=int, default=None, help="針對 rolling_finetune, 往回看的歷史資料長度 (月數), 0 表示僅使用新資料")
 
     args = parser.parse_args()
 
@@ -48,6 +49,7 @@ def parse_args(config: BaselineConfig) -> BaselineConfig:
     if args.num_ensembles is not None: config.num_ensembles = args.num_ensembles
     if args.training_strategy is not None: config.training_strategy = args.training_strategy
     if args.step_months is not None: config.step_months = args.step_months
+    if args.lookback_months is not None: config.rolling_lookback_months = args.lookback_months
     if args.task_type is not None: config.task_type = args.task_type
     if args.jump_threshold is not None: config.jump_threshold = args.jump_threshold
     if args.start_year is not None: config.start_year = args.start_year
@@ -271,6 +273,12 @@ def main():
                     window_actuals = actuals
                     window_dates = dates
                     window_permnos = permnos
+                else:
+                    assert window_dates is not None
+                    assert window_permnos is not None
+                    assert np.array_equal(actuals, window_actuals)
+                    assert np.array_equal(dates, window_dates)
+                    assert np.array_equal(permnos, window_permnos)
 
             ensemble_pred = np.mean(window_preds_list, axis=0)
             all_window_dfs.append(pd.DataFrame({
