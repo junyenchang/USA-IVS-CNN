@@ -42,14 +42,14 @@ class BacktestEngine:
             q10 = valid_preds.quantile(0.10)
             q90 = valid_preds.quantile(0.90)
 
-            # 給予權重 (假設 Equal Weight，多空各 100% 資金)
+            # 給予權重 (Equal Weight，多空各 100% 資金)
             if self.task_type == "classification" and self.jump_threshold < 0:
                 # 預測大於負向 jump 跌幅的機率時：機率越高代表越可能大跌
                 # 買入 (Long) 機率最低的群組，做空 (Short) 機率最高的群組
                 long_cond = group['Pred'] <= q10
                 short_cond = group['Pred'] >= q90
             else:
-                # 原 Regression 或正向 Jump 等預設邏輯
+                # Regression 或正向 Jump
                 long_cond = group['Pred'] >= q90
                 short_cond = group['Pred'] <= q10
 
@@ -111,7 +111,7 @@ class BacktestEngine:
             active_assets = all_assets[active_mask]
 
             month_detail = pd.DataFrame({
-                'Date': t_month,
+                'Date': t_month + 1,  # 持倉在 t_month 月底決定，報酬在 t_month+1 月底實現，這樣才能跟 benchmark 的月報酬正確比較
                 'Permno': active_assets,
                 'Weight': w_target.loc[active_assets],
                 'Return': returns.loc[active_assets],
@@ -131,7 +131,7 @@ class BacktestEngine:
                 drifted_weights = pd.Series(0, index=all_assets)
 
             results.append({
-                'Date': t_month,
+                'Date': t_month + 1,  # 報酬在 t_month+1 月底實現
                 'Raw_Return': raw_return,
                 'Turnover': turnover.sum() / 2,
                 'TC': total_tc,
