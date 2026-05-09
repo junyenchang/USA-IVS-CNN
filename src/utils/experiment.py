@@ -81,4 +81,5 @@ class ExperimentLogger:
     def save_predictions(self, predictions_df: pd.DataFrame, filename: str = "ensemble_predictions.csv"):
         """儲存最終 Ensemble 預測結果"""
         save_path = os.path.join(self.exp_dir, filename)
+        predictions_df['Date'] = pd.to_datetime(predictions_df['Date']).dt.strftime('%Y-%m-%d')
         predictions_df.to_csv(save_path, index=False)
