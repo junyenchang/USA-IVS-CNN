@@ -1,6 +1,7 @@
 import torch
 import typing
 import matplotlib.pyplot as plt
+import numpy as np
 
 class ClipTransform:
     def __init__(self, max_val: float = 1.0):
@@ -65,3 +66,17 @@ def get_ivs_transform(transform_type: typing.Optional[str], **kwargs) -> typing.
 
     else:
         raise ValueError(f"尚未支援的 IVS 轉換方式: {transform_type}")
+
+def get_target_transform(transform_type: typing.Optional[str], **kwargs) -> typing.Optional[typing.Callable]:
+    if transform_type is None or transform_type.lower() == 'raw':
+        return None
+    elif transform_type.lower() == 'signed_log':
+        return lambda x: np.sign(x) * np.log1p(np.abs(x))
+    elif transform_type.lower() == 'arcsinh':
+        return lambda x: np.arcsinh(x)
+    elif transform_type.lower() == 'winsorize':
+        lower = kwargs.get('lower', -0.5)
+        upper = kwargs.get('upper', 0.5)
+        return lambda x: np.clip(x, lower, upper)
+    else:
+        raise ValueError(f"尚未支援的 Target 轉換方式: {transform_type}")

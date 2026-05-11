@@ -15,7 +15,7 @@ from src.utils.experiment import ExperimentLogger
 from src.models.cnn import CNN1, CNN4, CNN5
 from src.trainers.trainer import Trainer, EarlyStopping
 from src.data.dataset import IVSDataset
-from src.data.transforms import get_ivs_transform
+from src.data.transforms import get_ivs_transform, get_target_transform
 from src.backtester.backtest import BacktestEngine
 from src.utils.seed import set_seed
 pd.set_option('future.no_silent_downcasting', True)
@@ -31,6 +31,7 @@ def parse_args(config: BaselineConfig) -> BaselineConfig:
     parser.add_argument("--jump_threshold", type=float, default=None, help="classification 任務中 jump 的定義閾值")
     parser.add_argument("--model_type", type=str, default=None, help="模型類型 (CNN1/CNN4/CNN5)")
     parser.add_argument("--ivs_transform", type=str, default=None, help="IVS 特徵轉換方式 (raw/log/clip...)")
+    parser.add_argument("--target_transform", type=str, default=None, help="Label (Target) 轉換方式 (raw/signed_log/arcsinh/winsorize)")
     parser.add_argument("--learning_rate", type=float, default=None)
     parser.add_argument("--l1_lambda", type=float, default=None)
     parser.add_argument("--l2_lambda", type=float, default=None)
@@ -46,6 +47,7 @@ def parse_args(config: BaselineConfig) -> BaselineConfig:
     if args.exp_name is not None: config.exp_name = args.exp_name
     if args.model_type is not None: config.model_type = args.model_type
     if args.ivs_transform is not None: config.ivs_transform = args.ivs_transform
+    if args.target_transform is not None: config.target_transform = args.target_transform
     if args.learning_rate is not None: config.learning_rate = args.learning_rate
     if args.l1_lambda is not None: config.l1_lambda = args.l1_lambda
     if args.l2_lambda is not None: config.l2_lambda = args.l2_lambda
@@ -66,7 +68,8 @@ def parse_args(config: BaselineConfig) -> BaselineConfig:
 
 def prepare_datasets(config: BaselineConfig, train_start: int, train_end: int, val_start: int, val_end: int):
     """根據指定的年份範圍，建立 Dataset 並處理好 Transform"""
-    train_dataset = IVSDataset(config.data_dir, start_year=train_start, end_year=train_end)
+    target_transform_func = get_target_transform(config.target_transform)
+    train_dataset = IVSDataset(config.data_dir, start_year=train_start, end_year=train_end, target_transform=target_transform_func)
     X_flat = train_dataset.X.reshape(-1)
     indices = torch.randperm(X_flat.numel())[:1000000]
     sample_X = X_flat[indices]
@@ -87,7 +90,7 @@ def prepare_datasets(config: BaselineConfig, train_start: int, train_end: int, v
 
     ivs_transform_func = get_ivs_transform(config.ivs_transform, **transform_kwargs)
     train_dataset.transform = ivs_transform_func
-    val_dataset = IVSDataset(config.data_dir, start_year=val_start, end_year=val_end, transform=ivs_transform_func)
+    val_dataset = IVSDataset(config.data_dir, start_year=val_start, end_year=val_end, transform=ivs_transform_func, target_transform=target_transform_func)
 
     return train_dataset, val_dataset
 
@@ -144,7 +147,7 @@ def main():
 
         train_loader = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True)
         val_loader = DataLoader(val_dataset, batch_size=config.batch_size, shuffle=False)
-        sample_x, _, _, _ = train_dataset[0]
+        sample_x, _, _, _, _ = train_dataset[0]
         input_channels = sample_x.shape[0]
 
         all_predictions = []
@@ -172,7 +175,7 @@ def main():
             history = trainer.fit(train_loader, val_loader, epochs=config.epochs, early_stopping=early_stopping)
             all_histories.append(history)
 
-            preds, actuals, test_dates, test_permnos = trainer.predict(val_loader)
+            preds, actuals, test_dates, test_permnos, raw_actuals = trainer.predict(val_loader)
             all_predictions.append(preds)
             end_time = time.time()
             duration_minutes = (end_time - start_time) / 60
@@ -193,17 +196,20 @@ def main():
             'Date': test_dates,
             'Permno': test_permnos,
             'Pred': ensemble_pred,
-            'Actual': actuals
+            'Actual': actuals,
+            'ActualRaw': raw_actuals
         })
 
     elif config.training_strategy in ['expanding', 'rolling_finetune']:
         from src.data.time_window import TimeWindowDatasetManager
 
         print(f"\n--- Initializing TimeWindowDatasetManager ---")
+        target_transform_func = get_target_transform(config.target_transform)
         manager = TimeWindowDatasetManager(
             data_dir=config.data_dir,
             start_year=config.start_year,
-            val_end_year=config.val_end_year
+            val_end_year=config.val_end_year,
+            target_transform=target_transform_func
         )
 
         train_start_date = pd.Timestamp(f"{config.start_year}-01-01")
@@ -223,7 +229,7 @@ def main():
         warm_train_subset = manager.get_split(train_start_date, warm_end_date)
         warm_loader = DataLoader(warm_train_subset, batch_size=config.batch_size, shuffle=True)
 
-        sample_x, _, _, _ = warm_train_subset[0]
+        sample_x, _, _, _, _ = warm_train_subset[0]
         input_channels = sample_x.shape[0]
 
         print(f"\n--- Warm-up Phase: Training {config.num_ensembles} models for {config.warm_up_epochs} epochs ---")
@@ -271,10 +277,11 @@ def main():
                 trainer: Trainer = state['trainer']
                 # for param_group in trainer.optimizer.param_groups:
                 #     param_group['lr'] = config.learning_rate * 0.1
-                preds, actuals, dates, permnos = trainer.predict(test_loader)
+                preds, actuals, dates, permnos, raw_actuals = trainer.predict(test_loader)
                 window_preds_list.append(preds)
                 if window_actuals is None:
                     window_actuals = actuals
+                    window_raw_actuals = raw_actuals
                     window_dates = dates
                     window_permnos = permnos
                 else:
@@ -285,11 +292,13 @@ def main():
                     assert np.array_equal(permnos, window_permnos)
 
             ensemble_pred = np.mean(window_preds_list, axis=0)
+
             all_window_dfs.append(pd.DataFrame({
                 'Date': window_dates,
                 'Permno': window_permnos,
                 'Pred': ensemble_pred,
-                'Actual': window_actuals
+                'Actual': window_actuals,
+                'ActualRaw': window_raw_actuals
             }))
 
             # 微調權重 (Fine-tune)

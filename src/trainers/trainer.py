@@ -141,12 +141,13 @@ class Trainer:
             self.model.load_state_dict(early_stopping.best_weights)
         return history
 
-    def predict(self, dataloader: torch.utils.data.DataLoader) -> typing.Tuple[typing.List[float], typing.List[float], typing.List[str], typing.List[int]]:
+    def predict(self, dataloader: torch.utils.data.DataLoader) -> typing.Tuple[typing.List[float], typing.List[float], typing.List[str], typing.List[int], typing.List[float]]:
         self.model.eval()
         all_preds: typing.List[float] = []
         all_targets: typing.List[float] = []
         all_dates: typing.List[str] = []
         all_permnos: typing.List[int] = []
+        all_raw_targets: typing.List[float] = []
 
         with torch.no_grad():
             for batch_data in dataloader:
@@ -154,6 +155,12 @@ class Trainer:
                 y_batch: torch.Tensor = batch_data[1].to(self.device)
                 dates_batch: typing.List[str] = batch_data[2]
                 permnos_batch: torch.Tensor = batch_data[3]
+
+                if len(batch_data) > 4:
+                    raw_y_batch = batch_data[4]
+                else:
+                    raw_y_batch = y_batch
+
                 predictions: torch.Tensor = self.model(X_batch).squeeze(-1)
 
                 if self.task_type == "classification":
@@ -164,5 +171,10 @@ class Trainer:
                 all_dates.extend(dates_batch)           # strings list 不會被 DataLoader 轉型所以沒事
                 all_permnos.extend(permnos_batch.tolist())
 
+                if isinstance(raw_y_batch, torch.Tensor):
+                    all_raw_targets.extend(raw_y_batch.cpu().tolist())
+                else:
+                    all_raw_targets.extend(raw_y_batch)
 
-        return all_preds, all_targets, all_dates, all_permnos
+
+        return all_preds, all_targets, all_dates, all_permnos, all_raw_targets

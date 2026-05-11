@@ -11,21 +11,22 @@ class SubsetDataset(Dataset):
     """
     自 PyTorch 原始 Tensor 資料切出的輕量子集，避免重複拷貝。
     """
-    def __init__(self, X: torch.Tensor, y: torch.Tensor, dates: np.ndarray, permnos: np.ndarray, transform: Optional[Callable] = None):
+    def __init__(self, X: torch.Tensor, y: torch.Tensor, dates: np.ndarray, permnos: np.ndarray, transform: Optional[Callable] = None, y_raw: Optional[torch.Tensor] = None):
         self.X = X
         self.y = y
         self.dates = dates
         self.permnos = permnos
         self.transform = transform
+        self.y_raw = y_raw if y_raw is not None else y
 
     def __len__(self) -> int:
         return len(self.y)
 
-    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor, str, int]:
+    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor, str, int, float]:
         x = self.X[idx]
         if self.transform is not None:
             x = self.transform(x)
-        return x, self.y[idx], str(self.dates[idx]), self.permnos[idx]
+        return x, self.y[idx], str(self.dates[idx]), self.permnos[idx], self.y_raw[idx].item()
 
 class TimeWindowDatasetManager:
     """
@@ -61,8 +62,8 @@ class TimeWindowDatasetManager:
 
         # ===== 步驟 2：逐年讀取並轉為 Tensors =====
         print(f"Step 2: Loading and converting year-by-year data to Tensors...")
-        self.X_all, self.y_all, self.dates_all, self.permnos_all = self._load_year_by_year(start_year, val_end_year)
-        print(f"  ✓ Dataset cached. Total samples: {len(self.y_all)}")
+        self.X_all, self.y_all, self.y_raw_all, self.dates_all, self.permnos_all = self._load_year_by_year(start_year, val_end_year)
+        print(f" Dataset cached. Total samples: {len(self.y_all)}")
 
     def _build_global_returns_pool(self, start_year: int, end_year: int) -> pd.DataFrame:
         """
@@ -95,12 +96,13 @@ class TimeWindowDatasetManager:
 
         return returns_concat
 
-    def _load_year_by_year(self, start_year: int, end_year: int) -> Tuple[torch.Tensor, torch.Tensor, np.ndarray, np.ndarray]:
+    def _load_year_by_year(self, start_year: int, end_year: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, np.ndarray, np.ndarray]:
         """
         逐年讀取 IVS 數據，轉為 Tensors，並逐年清空 Pandas DataFrame 釋放記憶體。
         """
         all_X = []
         all_y = []
+        all_y_raw = []
         all_dates = []
         all_permnos = []
 
@@ -121,6 +123,7 @@ class TimeWindowDatasetManager:
             # 收集該年的 Tensors
             all_X.append(year_dataset.X)
             all_y.append(year_dataset.y)
+            all_y_raw.append(year_dataset.y_raw)
             all_dates.append(year_dataset.dates)
             all_permnos.extend(year_dataset.permnos)
 
@@ -142,10 +145,11 @@ class TimeWindowDatasetManager:
         # 合併所有年份的 Tensors
         X_all = torch.cat(all_X, dim=0)
         y_all = torch.cat(all_y, dim=0)
+        y_raw_all = torch.cat(all_y_raw, dim=0)
         dates_all = np.concatenate(all_dates, axis=0)
         permnos_all = np.array(all_permnos)
 
-        return X_all, y_all, dates_all, permnos_all
+        return X_all, y_all, y_raw_all, dates_all, permnos_all
 
     def get_split(self, start_date: pd.Timestamp, end_date: pd.Timestamp) -> SubsetDataset:
         """
@@ -159,5 +163,6 @@ class TimeWindowDatasetManager:
             self.y_all[idx],
             self.dates_all[idx],
             self.permnos_all[idx],
-            transform=self.transform
+            transform=self.transform,
+            y_raw=self.y_raw_all[idx]
         )

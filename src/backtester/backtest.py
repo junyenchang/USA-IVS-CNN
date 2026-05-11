@@ -19,6 +19,7 @@ class BacktestEngine:
         self.base_fee = base_fee_bps / 10000.0
         self.task_type = task_type
         self.jump_threshold = jump_threshold
+        self.actual_col = 'ActualRaw' if 'ActualRaw' in preds_df.columns else 'Actual'
         market_df = pd.read_parquet(os.path.join(stock_info_dir, 'market_metadata.parquet'))
         self.df = self._prepare_data(preds_df, market_df)
 
@@ -80,7 +81,7 @@ class BacktestEngine:
 
             # --- 1. 目標權重與實際報酬 ---
             w_target = current_month['target_weight'].fillna(0)
-            returns = current_month['Actual'].fillna(0)
+            returns = current_month[self.actual_col].fillna(0)
             is_microcap = current_month['is_microcap'].fillna(False).astype(bool)
 
             all_assets = w_target.index.union(drifted_weights.index)

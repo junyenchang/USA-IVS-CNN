@@ -70,11 +70,14 @@ class IVSDataset(Dataset):
             self.dates = np.concatenate(valid_dates, axis=0)
             self.permnos = np.concatenate(valid_permnos, axis=0)
 
+            self.y_raw = self.y.clone()
+
             if self.target_transform is not None:
-                self.y = torch.tensor(self.target_transform(self.y.numpy()))
+                self.y = torch.tensor(self.target_transform(self.y.numpy()), dtype=torch.float32)
         else:
             self.X = torch.empty((0, 1, 0, 0))
             self.y = torch.empty((0,))
+            self.y_raw = torch.empty((0,))
             self.dates = np.array([])
             self.permnos = np.array([])
 
@@ -163,7 +166,7 @@ class IVSDataset(Dataset):
     def __len__(self) -> int:
         return len(self.y)
 
-    def __getitem__(self, idx: int) -> typing.Tuple[torch.Tensor, torch.Tensor, str, int]:
+    def __getitem__(self, idx: int) -> typing.Tuple[torch.Tensor, torch.Tensor, str, int, float]:
         opt_date_str = str(self.dates[idx])
         permno = self.permnos[idx]
 
@@ -171,4 +174,4 @@ class IVSDataset(Dataset):
         if self.transform is not None:
             x = self.transform(x)
 
-        return x, self.y[idx], opt_date_str, permno
+        return x, self.y[idx], opt_date_str, permno, self.y_raw[idx].item()
