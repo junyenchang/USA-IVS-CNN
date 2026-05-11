@@ -31,12 +31,13 @@ class EarlyStopping:
                 self.early_stop = True
 
 class Trainer:
-    def __init__(self, model: nn.Module, optimizer: torch.optim.Optimizer, criterion: nn.Module, task_type: str, device: torch.device, jump_threshold: float = 0.0):
+    def __init__(self, model: nn.Module, optimizer: torch.optim.Optimizer, criterion: nn.Module, task_type: str, device: torch.device, jump_threshold: float = 0.0, l1_lambda: float = 0.0):
         self.model = model
         self.optimizer = optimizer
         self.criterion = criterion
         self.task_type = task_type
         self.device = device
+        self.l1_lambda = l1_lambda
         self.jump_threshold = jump_threshold
         self.model.to(self.device)
 
@@ -67,7 +68,20 @@ class Trainer:
 
             loss: torch.Tensor = self.criterion(predictions, y_batch)  # 3. 計算誤差
 
+            if self.l1_lambda > 0:
+                l1_penalty = torch.tensor(0.0, requires_grad=True).to(self.device)
+                for name, param in self.model.named_parameters():
+                    # 只對 fc.weight 做正則化
+                    if 'fc.weight' in name:
+                        l1_penalty = l1_penalty + param.abs().sum()
+
+                loss = loss + self.l1_lambda * l1_penalty
+
             loss.backward() # 4. Backward pass (反向傳播計算梯度)
+
+            # torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0) # 梯度裁剪，防止梯度爆炸
+            total_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+            # print(f"Gradient Norm: {total_norm:.4f}")
 
             self.optimizer.step() # 5. 更新權重
 
