@@ -32,6 +32,8 @@ def parse_args(config: BaselineConfig) -> BaselineConfig:
     parser.add_argument("--model_type", type=str, default=None, help="模型類型 (CNN1/CNN4/CNN5)")
     parser.add_argument("--ivs_transform", type=str, default=None, help="IVS 特徵轉換方式 (raw/log/clip...)")
     parser.add_argument("--learning_rate", type=float, default=None)
+    parser.add_argument("--l1_lambda", type=float, default=None)
+    parser.add_argument("--l2_lambda", type=float, default=None)
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--num_ensembles", type=int, default=None)
     parser.add_argument("--training_strategy", type=str, default=None, help="訓練機制 (standard/expanding/rolling_finetune)")
@@ -45,6 +47,8 @@ def parse_args(config: BaselineConfig) -> BaselineConfig:
     if args.model_type is not None: config.model_type = args.model_type
     if args.ivs_transform is not None: config.ivs_transform = args.ivs_transform
     if args.learning_rate is not None: config.learning_rate = args.learning_rate
+    if args.l1_lambda is not None: config.l1_lambda = args.l1_lambda
+    if args.l2_lambda is not None: config.l2_lambda = args.l2_lambda
     if args.epochs is not None: config.epochs = args.epochs
     if args.num_ensembles is not None: config.num_ensembles = args.num_ensembles
     if args.training_strategy is not None: config.training_strategy = args.training_strategy
@@ -156,7 +160,7 @@ def main():
             criterion = nn.BCEWithLogitsLoss() if config.task_type == "classification" else nn.MSELoss()
             optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate, weight_decay=config.l2_lambda)
 
-            trainer = Trainer(model, optimizer, criterion, config.task_type, device, config.jump_threshold)
+            trainer = Trainer(model, optimizer, criterion, config.task_type, device, config.jump_threshold, l1_lambda=config.l1_lambda)
 
             early_stopping = None
             if config.use_early_stopping:
@@ -232,7 +236,7 @@ def main():
             model = get_model(config.model_type, input_channels, config.max_pool)
             criterion = nn.BCEWithLogitsLoss() if config.task_type == "classification" else nn.MSELoss()
             optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate, weight_decay=config.l2_lambda)
-            trainer = Trainer(model, optimizer, criterion, config.task_type, device, config.jump_threshold)
+            trainer = Trainer(model, optimizer, criterion, config.task_type, device, config.jump_threshold, l1_lambda=config.l1_lambda)
             trainer.fit(warm_loader, warm_loader, epochs=config.warm_up_epochs) # We don't need to early stop during warm-up, so we can pass the same loader for train and val
 
             model_states.append({'model': model, 'optimizer': optimizer, 'trainer': trainer})

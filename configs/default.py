@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 @dataclass
 class BaselineConfig:
     project_root: str = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-    dataset_type: str = "USA" # "USA" or "USA_ALL"
+    dataset_type: str = "USA_ALL" # "USA" or "USA_ALL"
     data_dir: str = field(init=False)
     result_dir: str = os.path.join(ResultsPath.CNN)
 
@@ -18,7 +18,7 @@ class BaselineConfig:
             raise ValueError(f"Unknown dataset_type: {self.dataset_type}")
 
     exp_group: str = ''
-    exp_name: str = "CNN4_Baseline"
+    exp_name: str = "CNN1_Baseline"
     task_type: str = "regression" # or 'classification'
 
     # 若為 classification，在此設定跳躍的定義閾值 (如預測下個月回報 <= -15%)
@@ -35,11 +35,15 @@ class BaselineConfig:
     # 'raw' (原樣), 'log' (取對數 log1p), 'clip' (截尾固定上限)
     ivs_transform: str = 'raw'
     ivs_clip_max: float = 0.9
-
+    # 控制 Label (Target / 報酬率) 的轉換方式:
+    # 'raw' (原樣), 'signed_log' (sign(x) * log1p(abs(x))), 'arcsinh', 'winsorize'
+    target_transform: str = 'signed_log' # 0.6228
+    target_winsorize_lower: float = -0.5
+    target_winsorize_upper: float = 0.5
     # ---------------------------------------------------------
     # Model types
     # ---------------------------------------------------------
-    model_type: str = "CNN4"
+    model_type: str = "CNN1"
     max_pool: bool = True
 
     # ---------------------------------------------------------
@@ -48,6 +52,7 @@ class BaselineConfig:
     random_seed: int = 42
     batch_size: int = 512
     learning_rate: float = 1e-3
+    l1_lambda: float = 1e-4
     l2_lambda: float = 1e-4
     epochs: int = 100
 
@@ -62,14 +67,14 @@ class BaselineConfig:
     # 'standard'  : 一次性切分 Train/Val/Test
     # 'expanding' : 論文中的 Expanding window，先以 warm_up_years 起步，逐年/月加入新資料微調
     # 'rolling_finetune' : 僅使用最新往前推一定時間的資料微調
-    training_strategy: str = 'rolling_finetune'
+    training_strategy: str = 'standard'
 
     # 針對 Expanding / Rolling Strategy 的專屬設定
     warm_up_years: int = 7     # 起始熱身期使用的年份總數 (ex: 1998~2004)
     warm_up_epochs: int = 10   # 熱身期資料的初始訓練 epochs
     transfer_epochs: int = 5   # 每推移一個月/年，新資料加入後微調的 epochs
     step_months: int = 1       # 每次推進的步長 (1=逐月, 12=逐年)
-    rolling_lookback_months: int = 60 # 針對 rolling_finetune，往回看的歷史資料長度，0 表示僅使用新資料
+    rolling_lookback_months: int = 0 # 針對 rolling_finetune，往回看的歷史資料長度，0 表示僅使用新資料
 
     # ---------------------------------------------------------
     # Ensemble 設定 (Ensembling)
