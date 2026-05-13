@@ -66,10 +66,28 @@ def parse_args(config: BaselineConfig) -> BaselineConfig:
 
     return config
 
+def truncate_dataset_before_month(dataset: IVSDataset, cutoff: pd.Timestamp):
+    dates = pd.to_datetime(pd.Series(dataset.dates))
+    mask = dates < cutoff
+    idx = np.where(mask.to_numpy())[0]
+
+    dataset.X = dataset.X[idx]
+    dataset.y = dataset.y[idx]
+    dataset.dates = dataset.dates[idx]
+    dataset.permnos = dataset.permnos[idx]
+    return dataset
+
 def prepare_datasets(config: BaselineConfig, train_start: int, train_end: int, val_start: int, val_end: int):
     """根據指定的年份範圍，建立 Dataset 並處理好 Transform"""
     target_transform_func = get_target_transform(config.target_transform)
     train_dataset = IVSDataset(config.data_dir, start_year=train_start, end_year=train_end, target_transform=target_transform_func)
+
+    train_cutoff = pd.Timestamp(f"{train_end}-12-01")
+    train_dataset = truncate_dataset_before_month(train_dataset, train_cutoff)
+
+    if len(train_dataset) == 0:
+        raise ValueError("Training dataset is empty after trimming the last month.")
+
     X_flat = train_dataset.X.reshape(-1)
     indices = torch.randperm(X_flat.numel())[:1000000]
     sample_X = X_flat[indices]
@@ -215,18 +233,20 @@ def main():
         train_start_date = pd.Timestamp(f"{config.start_year}-01-01")
         global_end_date = pd.Timestamp(f"{config.val_end_year}-12-31")
         warm_end_date = train_start_date + pd.DateOffset(years=config.warm_up_years) - pd.Timedelta(days=1)
+        warm_train_end = warm_end_date - pd.offsets.MonthEnd(1)
 
         print(f"Train start date: {train_start_date}")
         print(f"Warm-up end date: {warm_end_date}")
+        print(f"Warm-up train end date: {warm_train_end}")
 
         # Use the raw warm-up subset to fit the transform and cache it in the manager, then get the transformed warm-up subset for training
-        raw_warm_up_subset = manager.get_split(train_start_date, warm_end_date)
+        raw_warm_up_subset = manager.get_split(train_start_date, warm_train_end)
         if len(raw_warm_up_subset) == 0:
             raise ValueError("Warm-up dataset is empty. Check your start_year and warm_up_years.")
         manager.transform = get_transform_func(config, raw_warm_up_subset.X)
 
         # Get the warm-up subset again with the transform applied
-        warm_train_subset = manager.get_split(train_start_date, warm_end_date)
+        warm_train_subset = manager.get_split(train_start_date, warm_train_end)
         warm_loader = DataLoader(warm_train_subset, batch_size=config.batch_size, shuffle=True)
 
         sample_x, _, _, _, _ = warm_train_subset[0]
@@ -275,8 +295,6 @@ def main():
 
             for state in model_states:
                 trainer: Trainer = state['trainer']
-                # for param_group in trainer.optimizer.param_groups:
-                #     param_group['lr'] = config.learning_rate * 0.1
                 preds, actuals, dates, permnos, raw_actuals = trainer.predict(test_loader)
                 window_preds_list.append(preds)
                 if window_actuals is None:
@@ -327,6 +345,8 @@ def main():
             print(f"Fine-tuning {len(model_states)} models from {finetune_start.strftime('%Y-%m')} to {safe_finetune_end.strftime('%Y-%m')}")
             for state in model_states:
                 trainer: Trainer = state['trainer']
+                # for param_group in trainer.optimizer.param_groups:
+                #     param_group['lr'] = config.learning_rate * 0.1
                 trainer.fit(finetune_loader, finetune_loader, epochs=config.transfer_epochs) # Don't need early stopping during fine-tuning too
 
             current_end = test_end
