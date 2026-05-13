@@ -2,6 +2,7 @@ import torch
 import typing
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 
 class ClipTransform:
     def __init__(self, max_val: float = 1.0):
@@ -71,12 +72,30 @@ def get_target_transform(transform_type: typing.Optional[str], **kwargs) -> typi
     if transform_type is None or transform_type.lower() == 'raw':
         return None
     elif transform_type.lower() == 'signed_log':
-        return lambda x: np.sign(x) * np.log1p(np.abs(x))
+        return lambda x, **kw: np.sign(x) * np.log1p(np.abs(x))
     elif transform_type.lower() == 'arcsinh':
-        return lambda x: np.arcsinh(x)
+        return lambda x, **kw: np.arcsinh(x)
     elif transform_type.lower() == 'winsorize':
-        lower = kwargs.get('lower', -0.5)
-        upper = kwargs.get('upper', 0.5)
-        return lambda x: np.clip(x, lower, upper)
+        def cs_winsorize(x, dates=None, **kw):
+            if dates is None:
+                raise ValueError("Cross-sectional winsorize requires 'dates' argument.")
+            df = pd.DataFrame({'y': x, 'date': dates})
+            df['ym'] = pd.to_datetime(df['date']).dt.to_period('M')
+            lower = df.groupby('ym')['y'].transform(lambda g: g.quantile(0.01))
+            upper = df.groupby('ym')['y'].transform(lambda g: g.quantile(0.99))
+            return np.clip(np.asarray(x), lower.to_numpy(), upper.to_numpy())
+        return cs_winsorize
+    elif transform_type.lower() == 'rank':
+        def cs_rank(x, dates=None, **kw):
+            if dates is None:
+                raise ValueError("Cross-sectional rank requires 'dates' argument.")
+            df = pd.DataFrame({'y': x, 'date': dates})
+            df['ym'] = pd.to_datetime(df['date']).dt.to_period('M')
+            # 沿用與 winsorize 相同的設計思路：這會在每個月內部橫向排序。
+            # pct=True 會讓排名變成分位數百分比 (落在 (0, 1] 之間)。報酬最高為 1，報酬最低逼近 0。
+            ranks = df.groupby('ym')['y'].rank(pct=True, ascending=True)
+            # 將 0~1 的分位數映射至 -1 到 1 的神經網路最適訓練區間
+            return (ranks.to_numpy() * 2) - 1
+        return cs_rank
     else:
         raise ValueError(f"尚未支援的 Target 轉換方式: {transform_type}")
