@@ -40,6 +40,9 @@ def parse_args(config: BaselineConfig) -> BaselineConfig:
     parser.add_argument("--training_strategy", type=str, default=None, help="訓練機制 (standard/expanding/rolling_finetune)")
     parser.add_argument("--step_months", type=int, default=None, help="時間窗推進的步長 (月數)")
     parser.add_argument("--lookback_months", type=int, default=None, help="針對 rolling_finetune, 往回看的歷史資料長度 (月數), 0 表示僅使用新資料")
+    parser.add_argument("--shrcd", type=int, nargs="+", default=None, help="篩選 Share Code (例如 --shrcd 10 11)")
+    parser.add_argument("--exchcd", type=int, nargs="+", default=None, help="篩選 Exchange Code (例如 --exchcd 1 2 3)")
+    parser.add_argument("--return_outlier_quantile", type=float, default=None, help="篩選極端報酬分位數 (對 future_return 做去除，如 0.01)")
 
     args = parser.parse_args()
 
@@ -63,6 +66,9 @@ def parse_args(config: BaselineConfig) -> BaselineConfig:
     if args.dataset_type is not None:
         config.dataset_type = args.dataset_type
         config.__post_init__() # re-initialize data_dir based on dataset_type
+    if args.shrcd is not None: config.shrcd = args.shrcd
+    if args.exchcd is not None: config.exchcd = args.exchcd
+    if args.return_outlier_quantile is not None: config.return_outlier_quantile = args.return_outlier_quantile
 
     return config
 
@@ -80,7 +86,15 @@ def truncate_dataset_before_month(dataset: IVSDataset, cutoff: pd.Timestamp):
 def prepare_datasets(config: BaselineConfig, train_start: int, train_end: int, val_start: int, val_end: int):
     """根據指定的年份範圍，建立 Dataset 並處理好 Transform"""
     target_transform_func = get_target_transform(config.target_transform)
-    train_dataset = IVSDataset(config.data_dir, start_year=train_start, end_year=train_end, target_transform=target_transform_func)
+    train_dataset = IVSDataset(
+        config.data_dir,
+        start_year=train_start,
+        end_year=train_end,
+        target_transform=target_transform_func,
+        shrcd=config.shrcd,
+        exchcd=config.exchcd,
+        return_outlier_quantile=config.return_outlier_quantile
+    )
 
     train_cutoff = pd.Timestamp(f"{train_end}-12-01")
     train_dataset = truncate_dataset_before_month(train_dataset, train_cutoff)
@@ -108,7 +122,16 @@ def prepare_datasets(config: BaselineConfig, train_start: int, train_end: int, v
 
     ivs_transform_func = get_ivs_transform(config.ivs_transform, **transform_kwargs)
     train_dataset.transform = ivs_transform_func
-    val_dataset = IVSDataset(config.data_dir, start_year=val_start, end_year=val_end, transform=ivs_transform_func, target_transform=target_transform_func)
+    val_dataset = IVSDataset(
+        config.data_dir,
+        start_year=val_start,
+        end_year=val_end,
+        transform=ivs_transform_func,
+        target_transform=target_transform_func,
+        shrcd=config.shrcd,
+        exchcd=config.exchcd,
+        return_outlier_quantile=config.return_outlier_quantile
+    )
 
     return train_dataset, val_dataset
 
@@ -172,10 +195,10 @@ def main():
         all_histories = []
 
         for i in range(config.num_ensembles):
-            print(f"\n--- Training Ensemble Model {i+1}/{config.num_ensembles} ---")
-            start_time = time.time()
             current_seed = init_seed + i
             set_seed(current_seed)
+            print(f"\n--- Training Ensemble Model {i+1}/{config.num_ensembles}. Seed: {current_seed} ---")
+            start_time = time.time()
 
             model = get_model(config.model_type, input_channels, config.max_pool)
             criterion = nn.BCEWithLogitsLoss() if config.task_type == "classification" else nn.MSELoss()
@@ -227,7 +250,10 @@ def main():
             data_dir=config.data_dir,
             start_year=config.start_year,
             val_end_year=config.val_end_year,
-            target_transform=target_transform_func
+            target_transform=target_transform_func,
+            shrcd=config.shrcd,
+            exchcd=config.exchcd,
+            return_outlier_quantile=config.return_outlier_quantile
         )
 
         train_start_date = pd.Timestamp(f"{config.start_year}-01-01")
