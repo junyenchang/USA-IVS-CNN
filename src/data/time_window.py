@@ -46,7 +46,10 @@ class TimeWindowDatasetManager:
         val_end_year: int,
         value_col: str = 'impl_volatility',
         target_transform: Optional[Callable] = None,
-        transform: Optional[Callable] = None
+        transform: Optional[Callable] = None,
+        shrcd: Optional[Tuple[int, ...]] = None,
+        exchcd: Optional[Tuple[int, ...]] = None,
+        return_outlier_quantile: Optional[float] = None
     ):
         self.data_dir = data_dir
         self.value_col = value_col
@@ -54,11 +57,14 @@ class TimeWindowDatasetManager:
         self.transform = transform
         self.start_year = start_year
         self.val_end_year = val_end_year
+        self.shrcd = shrcd
+        self.exchcd = exchcd
+        self.return_outlier_quantile = return_outlier_quantile
 
         # ===== 步驟 1：輕量級構建全局報酬池 =====
         print(f"Step 1: Building lightweight global returns pool from {start_year} to {val_end_year}...")
         self.global_returns = self._build_global_returns_pool(start_year, val_end_year)
-        print(f"  ✓ Global returns pool built: {len(self.global_returns)} records")
+        print(f" Global returns pool built: {len(self.global_returns)} records")
 
         # ===== 步驟 2：逐年讀取並轉為 Tensors =====
         print(f"Step 2: Loading and converting year-by-year data to Tensors...")
@@ -117,7 +123,10 @@ class TimeWindowDatasetManager:
                 value_col=self.value_col,
                 target_transform=self.target_transform,
                 transform=None,  # Transform 延後到 get_split() 時進行
-                global_returns=self.global_returns  # 傳入全局報酬池，避免重複計算
+                global_returns=self.global_returns,  # 傳入全局報酬池，避免重複計算
+                shrcd=self.shrcd,
+                exchcd=self.exchcd,
+                return_outlier_quantile=self.return_outlier_quantile
             )
 
             # 收集該年的 Tensors

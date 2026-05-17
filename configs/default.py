@@ -1,4 +1,5 @@
 import os
+import typing
 from src.path import OptionPath, ResultsPath
 from dataclasses import dataclass, field
 
@@ -31,15 +32,19 @@ class BaselineConfig:
     standard_train_end_year: int = 2018
     val_end_year: int = 2023
 
+    # IVS Data Filters
+    shrcd: typing.Optional[typing.Tuple[int, ...]] = (10, 11, 12)
+    exchcd: typing.Optional[typing.Tuple[int, ...]] = None
+    return_outlier_quantile: typing.Optional[float] = 0.0
+
     # 控制 IVS 特徵的轉換方式:
     # 'raw' (原樣), 'log' (取對數 log1p), 'clip' (截尾固定上限)
     ivs_transform: str = 'raw'
     ivs_clip_max: float = 0.9
     # 控制 Label (Target / 報酬率) 的轉換方式:
-    # 'raw' (原樣), 'signed_log' (sign(x) * log1p(abs(x))), 'arcsinh', 'winsorize'
-    target_transform: str = 'signed_log' # 0.6228
-    target_winsorize_lower: float = -0.5
-    target_winsorize_upper: float = 0.5
+    # 'raw' (原樣), 'signed_log' (sign(x) * log1p(abs(x))), 'arcsinh'
+    # 使用當期 cross-sectional 轉換: 'winsorize', 'rank'
+    target_transform: str = 'log100'
     # ---------------------------------------------------------
     # Model types
     # ---------------------------------------------------------
@@ -52,8 +57,8 @@ class BaselineConfig:
     random_seed: int = 42
     batch_size: int = 512
     learning_rate: float = 1e-3
-    l1_lambda: float = 1e-4
-    l2_lambda: float = 1e-4
+    l1_lambda: float = 0.0
+    l2_lambda: float = 0.0
     epochs: int = 100
 
     # Early Stopping 設定
@@ -67,7 +72,7 @@ class BaselineConfig:
     # 'standard'  : 一次性切分 Train/Val/Test
     # 'expanding' : 論文中的 Expanding window，先以 warm_up_years 起步，逐年/月加入新資料微調
     # 'rolling_finetune' : 僅使用最新往前推一定時間的資料微調
-    training_strategy: str = 'standard'
+    training_strategy: str = 'rolling_finetune'
 
     # 針對 Expanding / Rolling Strategy 的專屬設定
     warm_up_years: int = 7     # 起始熱身期使用的年份總數 (ex: 1998~2004)

@@ -17,7 +17,10 @@ class IVSDataset(Dataset):
         grid_T: typing.Optional[typing.List[int]] = None,
         target_transform: typing.Optional[typing.Callable] = None,
         transform: typing.Optional[typing.Callable] = None,
-        global_returns: typing.Optional[pd.DataFrame] = None
+        global_returns: typing.Optional[pd.DataFrame] = None,
+        shrcd: typing.Optional[typing.Tuple[int, ...]] = None,
+        exchcd: typing.Optional[typing.Tuple[int, ...]] = None,
+        return_outlier_quantile: typing.Optional[float] = None
     ):
         self.data_dir = data_dir
         self.value_col = value_col
@@ -25,6 +28,9 @@ class IVSDataset(Dataset):
         self.target_transform = target_transform
         self.transform = transform
         self.global_returns = global_returns
+        self.shrcd = shrcd
+        self.exchcd = exchcd
+        self.return_outlier_quantile = return_outlier_quantile
 
         self.X_list: typing.List[torch.Tensor] = []
         self.y_list: typing.List[torch.Tensor] = []
@@ -35,7 +41,16 @@ class IVSDataset(Dataset):
 
         for year in range(start_year, end_year + 1):
             grid_suffix = "" if grid_T is None else "_" + "-".join(map(str, sorted(grid_T)))
-            cache_file = os.path.join(OptionPath.Cache, f"ivs_tensor_{year}_{grid_suffix}.pt")
+            filter_suffix = ""
+            if self.shrcd is not None:
+                filter_suffix += "_shr" + "-".join(map(str, sorted(self.shrcd)))
+            if self.exchcd is not None:
+                filter_suffix += "_exc" + "-".join(map(str, sorted(self.exchcd)))
+            if self.return_outlier_quantile is not None:
+                q = int(self.return_outlier_quantile) * 100
+                filter_suffix += f"_roq{q}pct"
+
+            cache_file = os.path.join(OptionPath.Cache, f"ivs_tensor_{year}{grid_suffix}{filter_suffix}.pt")
 
             if os.path.exists(cache_file):
                 cached = torch.load(cache_file, weights_only=False) # Changed to False because NumPy arrays are loaded
@@ -73,7 +88,11 @@ class IVSDataset(Dataset):
             self.y_raw = self.y.clone()
 
             if self.target_transform is not None:
-                self.y = torch.tensor(self.target_transform(self.y.numpy()), dtype=torch.float32)
+                try:
+                    transformed = self.target_transform(self.y.numpy(), dates=self.dates)
+                except TypeError:
+                    transformed = self.target_transform(self.y.numpy())
+                self.y = torch.tensor(transformed, dtype=torch.float32)
         else:
             self.X = torch.empty((0, 1, 0, 0))
             self.y = torch.empty((0,))
@@ -87,6 +106,11 @@ class IVSDataset(Dataset):
             return torch.empty((0, 1, 0, 0)), torch.empty((0,)), np.array([]), np.array([])
 
         raw_df = pd.read_parquet(file_path)
+        if self.shrcd is not None:
+            raw_df = raw_df[raw_df['shrcd'].isin(self.shrcd)]
+        if self.exchcd is not None:
+            raw_df = raw_df[raw_df['exchcd'].isin(self.exchcd)]
+
         raw_df['opt_date'] = pd.to_datetime(raw_df['opt_date'])
         raw_df['crsp_date'] = pd.to_datetime(raw_df['crsp_date'])
 
@@ -111,8 +135,9 @@ class IVSDataset(Dataset):
         clean_df = raw_df[valid_mask].copy()
 
         clean_df['current_month'] = clean_df['opt_date'].dt.to_period('M')
-        latest_dates = clean_df.groupby(['permno', 'current_month'])['opt_date'].transform('max')
-        clean_df = clean_df[clean_df['opt_date'] == latest_dates]
+        # CROSS-SECTIONAL MAX OP_DATE (instead of firm-level max)
+        month_end_dates = clean_df.groupby('current_month')['opt_date'].transform('max')
+        clean_df = clean_df[clean_df['opt_date'] == month_end_dates]
 
         df_merged = pd.merge(
             clean_df,
@@ -122,6 +147,13 @@ class IVSDataset(Dataset):
             how='left'
         )
         df_merged = df_merged.dropna(subset=['future_return'])
+
+        if self.return_outlier_quantile is not None:
+            q = self.return_outlier_quantile
+            lower = df_merged.groupby('opt_date')['future_return'].transform(lambda x: x.quantile(q))
+            upper = df_merged.groupby('opt_date')['future_return'].transform(lambda x: x.quantile(1 - q))
+            df_merged = df_merged[(df_merged['future_return'] >= lower) & (df_merged['future_return'] <= upper)]
+
         self.df = df_merged
         if df_merged.empty:
             return torch.empty((0, 1, 0, 0)), torch.empty((0,)), np.array([]), np.array([])
@@ -158,7 +190,7 @@ class IVSDataset(Dataset):
         # Meta properties natively extracted
         idx_df = pivot_df.index.to_frame(index=False)
         y_year = torch.tensor(idx_df['future_return'].values.astype(np.float32))
-        dates_year = np.array([str(date) for date in idx_df['opt_date'].values])
+        dates_year = np.array(idx_df['opt_date'].values)
         permnos_year = np.array(idx_df['permno'].values.astype(np.int32))
 
         return X_year, y_year, dates_year, permnos_year
