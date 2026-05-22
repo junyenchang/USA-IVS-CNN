@@ -50,14 +50,18 @@ class Trainer:
         for batch_data in pbar:
             X_batch: torch.Tensor = batch_data[0].to(self.device)
             y_batch: torch.Tensor = batch_data[1].to(self.device)
+            if len(batch_data) > 4:
+                raw_y_batch: torch.Tensor = batch_data[4].to(self.device)
+            else:
+                raw_y_batch = y_batch
             batch_size: int = X_batch.size(0)
 
             # 分類任務轉標籤
-            if self.task_type == "classification" and self.jump_threshold != 0:
+            if self.task_type == "classification":
                 if self.jump_threshold < 0:
-                    y_batch = (y_batch <= self.jump_threshold).float()
+                    y_batch = (raw_y_batch <= self.jump_threshold).float()
                 else:
-                    y_batch = (y_batch >= self.jump_threshold).float()
+                    y_batch = (raw_y_batch >= self.jump_threshold).float()
 
             self.optimizer.zero_grad() # 1. 清空梯度
 
@@ -101,14 +105,18 @@ class Trainer:
             for batch_data in dataloader:
                 X_batch: torch.Tensor = batch_data[0].to(self.device)
                 y_batch: torch.Tensor = batch_data[1].to(self.device)
+                if len(batch_data) > 4:
+                    raw_y_batch: torch.Tensor = batch_data[4].to(self.device)
+                else:
+                    raw_y_batch = y_batch
                 batch_size: int = X_batch.size(0)
 
                 # 分類任務轉標籤
-                if self.task_type == "classification" and self.jump_threshold != 0:
+                if self.task_type == "classification":
                     if self.jump_threshold < 0:
-                        y_batch = (y_batch <= self.jump_threshold).float()
+                        y_batch = (raw_y_batch <= self.jump_threshold).float()
                     else:
-                        y_batch = (y_batch >= self.jump_threshold).float()
+                        y_batch = (raw_y_batch >= self.jump_threshold).float()
 
                 predictions: torch.Tensor = self.model(X_batch).squeeze(-1)
                 loss: torch.Tensor = self.criterion(predictions, y_batch)
@@ -160,6 +168,13 @@ class Trainer:
                     raw_y_batch = batch_data[4]
                 else:
                     raw_y_batch = y_batch
+
+                # 分類任務轉標籤
+                if self.task_type == "classification":
+                    if self.jump_threshold < 0:
+                        y_batch = (raw_y_batch.to(self.device) <= self.jump_threshold).float()
+                    else:
+                        y_batch = (raw_y_batch.to(self.device) >= self.jump_threshold).float()
 
                 predictions: torch.Tensor = self.model(X_batch).squeeze(-1)
 

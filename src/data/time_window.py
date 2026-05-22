@@ -19,12 +19,22 @@ class SubsetDataset(Dataset):
         self.transform = transform
         self.y_raw = y_raw if y_raw is not None else y
 
+        if self.transform is not None and getattr(self.transform, 'is_cross_sectional', False):
+            if self.X.shape[0] > 0:
+                self.X = self.transform(self.X, dates=self.dates)
+
+    def set_transform(self, transform: Optional[Callable]):
+        self.transform = transform
+        if self.transform is not None and getattr(self.transform, 'is_cross_sectional', False):
+            if self.X.shape[0] > 0:
+                self.X = self.transform(self.X, dates=self.dates)
+
     def __len__(self) -> int:
         return len(self.y)
 
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor, str, int, float]:
         x = self.X[idx]
-        if self.transform is not None:
+        if self.transform is not None and not getattr(self.transform, 'is_cross_sectional', False):
             x = self.transform(x)
         return x, self.y[idx], str(self.dates[idx]), self.permnos[idx], self.y_raw[idx].item()
 

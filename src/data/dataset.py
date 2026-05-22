@@ -85,6 +85,9 @@ class IVSDataset(Dataset):
             self.dates = np.concatenate(valid_dates, axis=0)
             self.permnos = np.concatenate(valid_permnos, axis=0)
 
+            if self.transform is not None and getattr(self.transform, 'is_cross_sectional', False):
+                self.X = self.transform(self.X, dates=self.dates)
+
             self.y_raw = self.y.clone()
 
             if self.target_transform is not None:
@@ -99,6 +102,12 @@ class IVSDataset(Dataset):
             self.y_raw = torch.empty((0,))
             self.dates = np.array([])
             self.permnos = np.array([])
+
+    def set_transform(self, transform: typing.Optional[typing.Callable]):
+        self.transform = transform
+        if self.transform is not None and getattr(self.transform, 'is_cross_sectional', False):
+            if self.X.shape[0] > 0:
+                self.X = self.transform(self.X, dates=self.dates)
 
     def _process_year(self, year: int) -> typing.Tuple[torch.Tensor, torch.Tensor, np.ndarray, np.ndarray]:
         file_path = f"{self.data_dir}/option_ivs_crsp_{year}.parquet"
@@ -203,7 +212,7 @@ class IVSDataset(Dataset):
         permno = self.permnos[idx]
 
         x = self.X[idx]
-        if self.transform is not None:
+        if self.transform is not None and not getattr(self.transform, 'is_cross_sectional', False):
             x = self.transform(x)
 
         return x, self.y[idx], opt_date_str, permno, self.y_raw[idx].item()

@@ -70,6 +70,10 @@ def parse_args(config: BaselineConfig) -> BaselineConfig:
     if args.exchcd is not None: config.exchcd = args.exchcd
     if args.return_outlier_quantile is not None: config.return_outlier_quantile = args.return_outlier_quantile
 
+    if config.task_type == "classification":
+        print(f"Task is classification. Forcing target_transform to 'raw' to avoid interfering with 0/1 labeling.")
+        config.target_transform = 'raw'
+
     return config
 
 def truncate_dataset_before_month(dataset: IVSDataset, cutoff: pd.Timestamp):
@@ -121,17 +125,17 @@ def prepare_datasets(config: BaselineConfig, train_start: int, train_end: int, v
         transform_kwargs['cmap_name'] = 'viridis'
 
     ivs_transform_func = get_ivs_transform(config.ivs_transform, **transform_kwargs)
-    train_dataset.transform = ivs_transform_func
+    train_dataset.set_transform(ivs_transform_func)
     val_dataset = IVSDataset(
         config.data_dir,
         start_year=val_start,
         end_year=val_end,
-        transform=ivs_transform_func,
         target_transform=target_transform_func,
         shrcd=config.shrcd,
         exchcd=config.exchcd,
         return_outlier_quantile=config.return_outlier_quantile
     )
+    val_dataset.set_transform(ivs_transform_func)
 
     return train_dataset, val_dataset
 
