@@ -38,7 +38,8 @@ class BaselineConfig:
     return_outlier_quantile: typing.Optional[float] = 0.0
 
     # 控制 IVS 特徵的轉換方式:
-    # 'raw' (原樣), 'log' (取對數 log1p), 'clip' (截尾固定上限)
+    # 'raw' (原樣), 'log' (取對數 log1p), 'clip' (截尾固定上限), 'zscore', 'minmax', 'rgb',
+    # 'self_demean', 'self_zscore', 'cs_demean', 'cs_zscore'
     ivs_transform: str = 'raw'
     ivs_clip_max: float = 0.9
     # 控制 Label (Target / 報酬率) 的轉換方式:
@@ -57,6 +58,7 @@ class BaselineConfig:
     random_seed: int = 42
     batch_size: int = 512
     learning_rate: float = 1e-3
+    dropout_rate: float = 0.0
     l1_lambda: float = 0.0
     l2_lambda: float = 0.0
     epochs: int = 100

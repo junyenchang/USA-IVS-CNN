@@ -33,6 +33,7 @@ def parse_args(config: BaselineConfig) -> BaselineConfig:
     parser.add_argument("--ivs_transform", type=str, default=None, help="IVS 特徵轉換方式 (raw/log/clip...)")
     parser.add_argument("--target_transform", type=str, default=None, help="Label (Target) 轉換方式 (raw/signed_log/arcsinh/winsorize)")
     parser.add_argument("--learning_rate", type=float, default=None)
+    parser.add_argument("--dropout_rate", type=float, default=None)
     parser.add_argument("--l1_lambda", type=float, default=None)
     parser.add_argument("--l2_lambda", type=float, default=None)
     parser.add_argument("--epochs", type=int, default=None)
@@ -52,6 +53,7 @@ def parse_args(config: BaselineConfig) -> BaselineConfig:
     if args.ivs_transform is not None: config.ivs_transform = args.ivs_transform
     if args.target_transform is not None: config.target_transform = args.target_transform
     if args.learning_rate is not None: config.learning_rate = args.learning_rate
+    if args.dropout_rate is not None: config.dropout_rate = args.dropout_rate
     if args.l1_lambda is not None: config.l1_lambda = args.l1_lambda
     if args.l2_lambda is not None: config.l2_lambda = args.l2_lambda
     if args.epochs is not None: config.epochs = args.epochs
@@ -161,13 +163,13 @@ def get_transform_func(config: BaselineConfig, X_tensor: torch.Tensor):
 
     return get_ivs_transform(config.ivs_transform, **transform_kwargs)
 
-def get_model(model_name: str, input_channels: int, max_pool: bool):
+def get_model(model_name: str, input_channels: int, max_pool: bool, dropout_rate: float):
     if model_name == "CNN1":
-        return CNN1(input_channels, max_pool)
+        return CNN1(input_channels, max_pool, dropout_rate)
     elif model_name == "CNN4":
-        return CNN4(input_channels, max_pool)
+        return CNN4(input_channels, max_pool, dropout_rate)
     elif model_name == "CNN5":
-        return CNN5(input_channels, max_pool)
+        return CNN5(input_channels, max_pool, dropout_rate)
     else:
         raise ValueError(f"Unsupported model name: {model_name}")
 
@@ -204,7 +206,7 @@ def main():
             print(f"\n--- Training Ensemble Model {i+1}/{config.num_ensembles}. Seed: {current_seed} ---")
             start_time = time.time()
 
-            model = get_model(config.model_type, input_channels, config.max_pool)
+            model = get_model(config.model_type, input_channels, config.max_pool, config.dropout_rate)
             criterion = nn.BCEWithLogitsLoss() if config.task_type == "classification" else nn.MSELoss()
             optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate, weight_decay=config.l2_lambda)
 
@@ -289,7 +291,7 @@ def main():
             print(f"Initializing Model {i+1}/{config.num_ensembles}")
             current_seed = init_seed + i
             set_seed(current_seed)
-            model = get_model(config.model_type, input_channels, config.max_pool)
+            model = get_model(config.model_type, input_channels, config.max_pool, config.dropout_rate)
             criterion = nn.BCEWithLogitsLoss() if config.task_type == "classification" else nn.MSELoss()
             optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate, weight_decay=config.l2_lambda)
             trainer = Trainer(model, optimizer, criterion, config.task_type, device, config.jump_threshold, l1_lambda=config.l1_lambda)
