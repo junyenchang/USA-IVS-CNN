@@ -6,7 +6,7 @@ class CNNBlock(nn.Module):
     def __init__(self, in_channels: int, out_channels: int, max_pool=True):
         super(CNNBlock, self).__init__()
         # 1. 卷積層 (3x3 filter)，padding=1 以免空間維度縮減過快
-        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding=1)
         # 2. ReLU 啟動函數
         self.relu = nn.ReLU()
         # 3. 2x2 最大池化層
@@ -22,22 +22,24 @@ class CNNBlock(nn.Module):
         return x
 
 class CNN1(nn.Module):
-    def __init__(self, in_channels: int = 1, max_pool: bool = True):
+    def __init__(self, in_channels: int = 1, max_pool: bool = True, dropout_rate: float = 0.0):
         super(CNN1, self).__init__()
         self.block1 = CNNBlock(in_channels, 128, max_pool=max_pool)
         self.gap = nn.AdaptiveAvgPool2d((1, 1))
         self.fc = nn.Linear(128, 1)
+        self.dropout = nn.Dropout(dropout_rate)
         self.apply(init_weights_xavier)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.block1(x)
         x = self.gap(x)
         x = torch.flatten(x, 1)
+        x = self.dropout(x)
         out: torch.Tensor = self.fc(x)
         return out
 
 class CNN4(nn.Module):
-    def __init__(self, in_channels: int = 1, max_pool: bool = True):
+    def __init__(self, in_channels: int = 1, max_pool: bool = True, dropout_rate: float = 0.0):
         super(CNN4, self).__init__()
 
         # 預設輸入為 1 個 Channel (IV 曲面)，依序經過 4 個區塊
@@ -53,6 +55,7 @@ class CNN4(nn.Module):
 
         # 單一層全連接節點，預測下個月回報
         self.fc = nn.Linear(128, 1)
+        self.dropout = nn.Dropout(dropout_rate)
         self.apply(init_weights_xavier)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -67,13 +70,14 @@ class CNN4(nn.Module):
 
         # 展平為一維向量 [Batch, 128] 以便輸入全連接層
         x = torch.flatten(x, 1)
+        x = self.dropout(x)
 
         # 輸出預測值 [Batch, 1]
         out: torch.Tensor = self.fc(x)
         return out
 
 class CNN5(nn.Module):
-    def __init__(self, in_channels: int = 1, max_pool: bool = True):
+    def __init__(self, in_channels: int = 1, max_pool: bool = True, dropout_rate: float = 0.0):
         super(CNN5, self).__init__()
 
         self.block1 = CNNBlock(in_channels, 16, max_pool=max_pool)
@@ -85,6 +89,7 @@ class CNN5(nn.Module):
         self.gap = nn.AdaptiveAvgPool2d((1, 1))
 
         self.fc = nn.Linear(256, 1)
+        self.dropout = nn.Dropout(dropout_rate)
         self.apply(init_weights_xavier)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -96,6 +101,7 @@ class CNN5(nn.Module):
 
         x = self.gap(x)
         x = torch.flatten(x, 1)
+        x = self.dropout(x)
 
         out: torch.Tensor = self.fc(x)
         return out
