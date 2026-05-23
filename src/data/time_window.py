@@ -86,7 +86,7 @@ class TimeWindowDatasetManager:
         輕量級讀取所有年份，只提取報酬相關欄位，構建全局報酬池。
         為了防止 Look-ahead Bias，包含 end_year 隔年的報酬數據。
         """
-        all_returns = []
+        all_returns: List[pd.DataFrame] = []
 
         # 讀取 start_year 到 end_year+1（多讀一年，確保年末 12 月有對應的隔年 1 月報酬）
         for year in range(start_year, end_year + 2):
@@ -106,7 +106,7 @@ class TimeWindowDatasetManager:
         returns_concat = returns_concat.drop_duplicates(subset=['permno', 'crsp_date'])
 
         # 計算報酬對應的月份（t 月的報酬 → t-1 月的 target）
-        returns_concat['target_for_month'] = returns_concat['crsp_date'].dt.to_period('M') - 1
+        returns_concat['target_for_month'] = returns_concat['crsp_date'].dt.to_period('M') - 1 # type: ignore
         returns_concat = returns_concat[['permno', 'target_for_month', 'crsp_monthly_return']]
         returns_concat.rename(columns={'crsp_monthly_return': 'future_return'}, inplace=True)
 
@@ -116,11 +116,11 @@ class TimeWindowDatasetManager:
         """
         逐年讀取 IVS 數據，轉為 Tensors，並逐年清空 Pandas DataFrame 釋放記憶體。
         """
-        all_X = []
-        all_y = []
-        all_y_raw = []
-        all_dates = []
-        all_permnos = []
+        all_X: List[torch.Tensor] = []
+        all_y: List[torch.Tensor] = []
+        all_y_raw: List[torch.Tensor] = []
+        all_dates: List[np.ndarray] = []
+        all_permnos: List[int] = []
 
         for year in range(start_year, end_year + 1):
             print(f"  Loading year {year}...")
