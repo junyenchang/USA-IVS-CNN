@@ -238,3 +238,55 @@ class BacktestEngine:
 
         print(f"回測圖表與時序結果已儲存至: {save_folder}")
         return merged_df
+
+    @staticmethod
+    def save_decile_analysis(preds_df: pd.DataFrame, save_folder: str):
+        """
+        依據預測值分 10 組，計算每一組的每月 Pred 與 Actual 平均值
+        """
+        actual_col = 'ActualRaw' if 'ActualRaw' in preds_df.columns else 'Actual'
+        df_clean = preds_df.dropna(subset=['Pred', actual_col]).copy()
+        df_clean['Date'] = pd.to_datetime(df_clean['Date'])
+        df_clean['Decile'] = df_clean.groupby('Date')['Pred'].transform(
+            lambda x: pd.qcut(x, 10, labels=False, duplicates='drop') + 1
+        )
+        monthly_decile_stats = df_clean.groupby(['Date', 'Decile'])[[actual_col, 'Pred']].mean().reset_index()
+        monthly_decile_stats.to_csv(os.path.join(save_folder, "monthly_decile_returns.csv"), index=False)
+        summary_df = monthly_decile_stats.groupby('Decile')[['Pred', actual_col]].mean()
+        summary_df.columns = ['Mean_Predicted_Value', 'Mean_Actual_Return']
+
+        top_decile = summary_df.index.max()
+        bottom_decile = summary_df.index.min()
+
+        # Convert to dictionary to avoid Pandas Scalar type issues in Pylance/Pyright when doing arithmetic operations on the summary statistics
+        summary_dict = summary_df.to_dict(orient='index')
+        spread_pred = summary_dict[top_decile]['Mean_Predicted_Value'] - summary_dict[bottom_decile]['Mean_Predicted_Value']
+        spread_actual = summary_dict[top_decile]['Mean_Actual_Return'] - summary_dict[bottom_decile]['Mean_Actual_Return']
+
+        spread_row = pd.DataFrame(
+            [[spread_pred, spread_actual]],
+            columns=summary_df.columns,
+            index=['Decile_10_minus_1']
+        )
+        summary_df = pd.concat([summary_df, spread_row])
+        summary_csv_path = os.path.join(save_folder, "decile_summary.csv")
+        summary_df.to_csv(summary_csv_path)
+        print(f"\n=== 10分組分析摘要已儲存至: {summary_csv_path} ===")
+        print(summary_df)
+
+        pivot_returns = monthly_decile_stats.pivot(index='Date', columns='Decile', values=actual_col)
+
+        plt.figure(figsize=(12, 6))
+        pivot_returns.plot(ax=plt.gca(), cmap='coolwarm', alpha=0.85, linewidth=1.5)
+
+        plt.title("Equal Weight Monthly Return by Prediction Decile", fontsize=14, fontweight='bold')
+        plt.xlabel("Date", fontsize=12)
+        plt.ylabel("Monthly Return", fontsize=12)
+        plt.axhline(0, color='gray', linestyle='--', alpha=0.5)
+
+        plt.legend(title="Decile", bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plot_path = os.path.join(save_folder, "decile_monthly_returns.png")
+        plt.savefig(plot_path, dpi=300)
+        plt.close()

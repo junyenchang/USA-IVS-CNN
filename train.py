@@ -409,6 +409,7 @@ def main():
         engine.save_holdings_report(logger.exp_dir)
         engine.calculate_metrics(backtest_results, save=True, save_path=os.path.join(logger.exp_dir, "backtest_metrics.txt"), rf_path=os.path.join(OptionPath.RFrate, "fama_french_rf_monthly.parquet"))
         engine.save_and_plot_performance(backtest_results, os.path.join(OptionPath.Benchmark, 'spy_benchmark_monthly.parquet'), logger.exp_dir)
+        engine.save_decile_analysis(df_preds, logger.exp_dir)
 
     except FileNotFoundError as e:
         print(f"File for backtesting not found: {e}")
