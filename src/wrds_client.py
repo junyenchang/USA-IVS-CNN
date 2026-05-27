@@ -192,26 +192,21 @@ class WRDSClient:
             AND (vl.edate >= '{start_date}' OR vl.edate IS NULL)
             -- 移除普通股及交易所限制
         ),
-        daily_returns AS (
-            SELECT d.permno,
-                date_trunc('month', d.date) AS month_start,
-                (1 + COALESCE(d.ret, 0)) * (1 + COALESCE(dl.dlret, 0)) AS gross_ret
-            FROM crsp.dsf d
-            LEFT JOIN crsp.dsedelist dl
-                ON d.permno = dl.permno AND d.date = dl.dlstdt
-            WHERE d.date >= '{start_date}' AND d.date <= '{end_date}'
-        ),
         monthly_accumulated AS (
-            SELECT permno,
-                date_trunc('month', month_start)::date AS crsp_date,
-                EXP(SUM(LN(GREATEST(gross_ret, 1e-10)))) - 1 AS crsp_monthly_return
-            FROM daily_returns
-            GROUP BY permno, month_start
+            SELECT m.permno,
+                date_trunc('month', m.date)::date AS crsp_date,
+                (1 + COALESCE(m.ret, 0)) * (1 + COALESCE(dl.dlret, 0)) - 1 AS crsp_monthly_return
+            FROM crsp.msf m
+            LEFT JOIN crsp.msedelist dl
+                ON m.permno = dl.permno
+                AND date_trunc('month', m.date) = date_trunc('month', dl.dlstdt)
+            WHERE m.date >= '{start_date}' AND m.date <= '{end_date}'
         ),
         crsp_me AS (
             SELECT
                 m.permno,
                 date_trunc('month', m.date) AS month_start,
+                ABS(m.prc) AS eom_prc,
                 ABS(m.prc) * m.shrout AS me,
                 n.exchcd,
                 n.shrcd,
@@ -245,6 +240,7 @@ class WRDSClient:
             m.crsp_date,
             m.crsp_monthly_return,
             c_me.me AS market_cap,
+            c_me.eom_prc,
             c_me.shrcd,
             c_me.exchcd,
             c_me.siccd,
