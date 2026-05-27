@@ -4,6 +4,8 @@ import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import Dataset
+from torch.utils.data import Sampler
+from collections import defaultdict
 
 from src.path import OptionPath
 
@@ -216,3 +218,45 @@ class IVSDataset(Dataset):
             x = self.transform(x)
 
         return x, self.y[idx], opt_date_str, permno, self.y_raw[idx].item()
+
+class TimeGroupBatchSampler(Sampler):
+    """
+    自訂 Batch Sampler, 確保每個 batch 內的資料都來自同一個時間點 (Date/Month)。
+    """
+    def __init__(self, dates, batch_size, shuffle=True):
+        self.batch_size = batch_size
+        self.shuffle = shuffle
+
+        # 建立 Date 到 Indices 的映射
+        self.date_to_indices = defaultdict(list)
+        for idx, date in enumerate(dates):
+            # 取決於 dates 的資料型態，假設是字串或 numpy 元素，直接作為 key
+            self.date_to_indices[date].append(idx)
+
+        self.unique_dates = list(self.date_to_indices.keys())
+
+        # 預先計算總共有多少個 batch 提供 __len__ 使用
+        self.num_batches = 0
+        for indices in self.date_to_indices.values():
+            # 無條件進位
+            self.num_batches += (len(indices) + self.batch_size - 1) // self.batch_size
+
+    def __iter__(self):
+        # 1. 決定日期的抽樣順序 (避免每次都按時間先後訓練，增加隨機性)
+        if self.shuffle:
+            np.random.shuffle(self.unique_dates)
+
+        # 2. 針對每一個日期，產生屬於該日期的 Batches
+        for date in self.unique_dates:
+            indices = self.date_to_indices[date]
+
+            if self.shuffle:
+                # 3. 打亂當月股票的順序
+                indices = np.random.permutation(indices).tolist()
+
+            # 4. 依照 batch_size 切割並 yield 出去
+            for i in range(0, len(indices), self.batch_size):
+                yield indices[i : i + self.batch_size]
+
+    def __len__(self):
+        return self.num_batches
