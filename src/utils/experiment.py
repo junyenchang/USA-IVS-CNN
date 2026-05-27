@@ -63,21 +63,6 @@ class ExperimentLogger:
         plt.savefig(os.path.join(self.exp_dir, "loss_curve_all.png"))
         plt.close()
 
-    def save_loss_history(self, history: dict, ensemble_idx: int):
-        """儲存 loss 並畫圖"""
-        # history 可能是 {'train_loss': [...], 'val_loss': [...]}
-        df = pd.DataFrame(history)
-        csv_path = os.path.join(self.exp_dir, f"loss_history_model_{ensemble_idx}.csv")
-        df.to_csv(csv_path, index=False)
-
-        plt.figure()
-        plt.plot(df['train_loss'], label='Train Loss')
-        plt.plot(df['val_loss'], label='Validation Loss')
-        plt.title(f"Model {ensemble_idx} Loss")
-        plt.legend()
-        plt.savefig(os.path.join(self.exp_dir, f"loss_curve_model_{ensemble_idx}.png"))
-        plt.close()
-
     def save_predictions(self, predictions_df: pd.DataFrame, filename: str = "ensemble_predictions.csv"):
         """儲存最終 Ensemble 預測結果"""
         save_path = os.path.join(self.exp_dir, filename)
