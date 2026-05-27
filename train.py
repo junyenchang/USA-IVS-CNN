@@ -14,10 +14,11 @@ from src.path import OptionPath
 from src.utils.experiment import ExperimentLogger
 from src.models.cnn import CNN1, CNN4, CNN5
 from src.trainers.trainer import Trainer, EarlyStopping
-from src.data.dataset import IVSDataset
+from src.data.dataset import IVSDataset, TimeGroupBatchSampler
 from src.data.transforms import get_ivs_transform, get_target_transform
 from src.backtester.backtest import BacktestEngine
 from src.utils.seed import set_seed
+from src.utils.loss import MSERankingLoss
 pd.set_option('future.no_silent_downcasting', True)
 
 def parse_args(config: BaselineConfig) -> BaselineConfig:
@@ -44,6 +45,8 @@ def parse_args(config: BaselineConfig) -> BaselineConfig:
     parser.add_argument("--shrcd", type=int, nargs="+", default=None, help="篩選 Share Code (例如 --shrcd 10 11)")
     parser.add_argument("--exchcd", type=int, nargs="+", default=None, help="篩選 Exchange Code (例如 --exchcd 1 2 3)")
     parser.add_argument("--return_outlier_quantile", type=float, default=None, help="篩選極端報酬分位數 (對 future_return 做去除，如 0.01)")
+    parser.add_argument("--rank_loss", action="store_true", help="是否啟用 TimeGroupBatchSampler 與 Ranking Loss")
+    parser.add_argument("--rank_lambda", type=float, default=None, help="ranking loss 佔總 loss 的權重")
 
     args = parser.parse_args()
 
@@ -71,6 +74,8 @@ def parse_args(config: BaselineConfig) -> BaselineConfig:
     if args.shrcd is not None: config.shrcd = args.shrcd
     if args.exchcd is not None: config.exchcd = args.exchcd
     if args.return_outlier_quantile is not None: config.return_outlier_quantile = args.return_outlier_quantile
+    if args.rank_loss is not None: config.rank_loss = args.rank_loss
+    if args.rank_lambda is not None: config.rank_lambda = args.rank_lambda
 
     if config.task_type == "classification":
         print(f"Task is classification. Forcing target_transform to 'raw' to avoid interfering with 0/1 labeling.")
@@ -118,12 +123,12 @@ def prepare_datasets(config: BaselineConfig, train_start: int, train_end: int, v
         transform_kwargs['std'] = train_dataset.X.std().item()
     elif config.ivs_transform == 'minmax':
         transform_kwargs['min_val'] = train_dataset.X.min().item()
-        transform_kwargs['max_val'] = torch.quantile(sample_X, 0.95).item()
+        transform_kwargs['max_val'] = torch.quantile(sample_X, 0.99).item()
     elif config.ivs_transform == 'clip':
         transform_kwargs['max_val'] = config.ivs_clip_max
     elif config.ivs_transform == 'rgb':
         transform_kwargs['min_val'] = train_dataset.X.min().item()
-        transform_kwargs['max_val'] = torch.quantile(sample_X, 0.95).item()
+        transform_kwargs['max_val'] = torch.quantile(sample_X, 0.99).item()
         transform_kwargs['cmap_name'] = 'viridis'
 
     ivs_transform_func = get_ivs_transform(config.ivs_transform, **transform_kwargs)
@@ -153,12 +158,12 @@ def get_transform_func(config: BaselineConfig, X_tensor: torch.Tensor):
         transform_kwargs['std'] = X_tensor.std().item()
     elif config.ivs_transform == 'minmax':
         transform_kwargs['min_val'] = X_tensor.min().item()
-        transform_kwargs['max_val'] = torch.quantile(sample_X, 0.95).item()
+        transform_kwargs['max_val'] = torch.quantile(sample_X, 0.99).item()
     elif config.ivs_transform == 'clip':
         transform_kwargs['max_val'] = config.ivs_clip_max
     elif config.ivs_transform == 'rgb':
         transform_kwargs['min_val'] = X_tensor.min().item()
-        transform_kwargs['max_val'] = torch.quantile(sample_X, 0.95).item()
+        transform_kwargs['max_val'] = torch.quantile(sample_X, 0.99).item()
         transform_kwargs['cmap_name'] = 'viridis'
 
     return get_ivs_transform(config.ivs_transform, **transform_kwargs)
@@ -192,8 +197,23 @@ def main():
             val_end=config.val_end_year
         )
 
-        train_loader = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True)
-        val_loader = DataLoader(val_dataset, batch_size=config.batch_size, shuffle=False)
+        if config.rank_loss:
+            train_batch_sampler = TimeGroupBatchSampler(
+                dates=train_dataset.dates,
+                batch_size=config.batch_size,
+                shuffle=True
+            )
+
+            val_batch_sampler = TimeGroupBatchSampler(
+                dates=val_dataset.dates,
+                batch_size=config.batch_size,
+                shuffle=False
+            )
+            train_loader = DataLoader(train_dataset, batch_sampler=train_batch_sampler)
+            val_loader = DataLoader(val_dataset, batch_sampler=val_batch_sampler)
+        else:
+            train_loader = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True)
+            val_loader = DataLoader(val_dataset, batch_size=config.batch_size, shuffle=False)
         sample_x, _, _, _, _ = train_dataset[0]
         input_channels = sample_x.shape[0]
 
@@ -207,7 +227,11 @@ def main():
             start_time = time.time()
 
             model = get_model(config.model_type, input_channels, config.max_pool, config.dropout_rate)
-            criterion = nn.BCEWithLogitsLoss() if config.task_type == "classification" else nn.MSELoss()
+            if config.task_type == "classification":
+                criterion = nn.BCEWithLogitsLoss()
+            else:
+                rank_weight = config.rank_lambda if config.rank_loss else 0.0
+                criterion = MSERankingLoss(rank_lambda=rank_weight)
             optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate, weight_decay=config.l2_lambda)
 
             trainer = Trainer(model, optimizer, criterion, config.task_type, device, config.jump_threshold, l1_lambda=config.l1_lambda)
