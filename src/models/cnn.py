@@ -3,14 +3,14 @@ import torch.nn as nn
 
 class CNNBlock(nn.Module):
     """論文中定義的核心構建單元"""
-    def __init__(self, in_channels: int, out_channels: int, max_pool=True):
+    def __init__(self, in_channels: int, out_channels: int, padding=1, stride=1):
         super(CNNBlock, self).__init__()
         # 1. 卷積層 (3x3 filter)，padding=1 以免空間維度縮減過快
-        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding=1)
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=stride, padding=padding)
         # 2. ReLU 啟動函數
         self.relu = nn.ReLU()
         # 3. 2x2 最大池化層
-        self.pool = nn.MaxPool2d(kernel_size=2, ceil_mode=True) if max_pool else nn.Identity()
+        self.pool = nn.MaxPool2d(kernel_size=2, ceil_mode=True)
         # 4. 批次歸一化層
         self.bn = nn.BatchNorm2d(out_channels)
 
@@ -22,9 +22,9 @@ class CNNBlock(nn.Module):
         return x
 
 class CNN1(nn.Module):
-    def __init__(self, in_channels: int = 1, max_pool: bool = True, dropout_rate: float = 0.0):
+    def __init__(self, in_channels: int = 1, dropout_rate: float = 0.0, padding: int = 1):
         super(CNN1, self).__init__()
-        self.block1 = CNNBlock(in_channels, 128, max_pool=max_pool)
+        self.block1 = CNNBlock(in_channels, 128, padding=padding)
         self.gap = nn.AdaptiveAvgPool2d((1, 1))
         self.fc = nn.Linear(128, 1)
         self.dropout = nn.Dropout(dropout_rate)
@@ -39,15 +39,15 @@ class CNN1(nn.Module):
         return out
 
 class CNN4(nn.Module):
-    def __init__(self, in_channels: int = 1, max_pool: bool = True, dropout_rate: float = 0.0):
+    def __init__(self, in_channels: int = 1, dropout_rate: float = 0.0, padding: int = 1):
         super(CNN4, self).__init__()
 
         # 預設輸入為 1 個 Channel (IV 曲面)，依序經過 4 個區塊
         # filter 數量遞增：16 -> 32 -> 64 -> 128
-        self.block1 = CNNBlock(in_channels, 16, max_pool=max_pool)
-        self.block2 = CNNBlock(16, 32, max_pool=max_pool)
-        self.block3 = CNNBlock(32, 64, max_pool=max_pool)
-        self.block4 = CNNBlock(64, 128, max_pool=max_pool)
+        self.block1 = CNNBlock(in_channels, 16, padding=padding)
+        self.block2 = CNNBlock(16, 32, padding=padding)
+        self.block3 = CNNBlock(32, 64, padding=padding)
+        self.block4 = CNNBlock(64, 128, padding=padding)
 
         # 全域平均池化 (GAP - Global Average Pooling)
         # AdaptiveAvgPool2d((1, 1)) 會將任何輸入大小的特徵圖平均縮放為 1x1
@@ -77,14 +77,14 @@ class CNN4(nn.Module):
         return out
 
 class CNN5(nn.Module):
-    def __init__(self, in_channels: int = 1, max_pool: bool = True, dropout_rate: float = 0.0):
+    def __init__(self, in_channels: int = 1, dropout_rate: float = 0.0, padding: int = 1):
         super(CNN5, self).__init__()
 
-        self.block1 = CNNBlock(in_channels, 16, max_pool=max_pool)
-        self.block2 = CNNBlock(16, 32, max_pool=max_pool)
-        self.block3 = CNNBlock(32, 64, max_pool=max_pool)
-        self.block4 = CNNBlock(64, 128, max_pool=max_pool)
-        self.block5 = CNNBlock(128, 256, max_pool=max_pool)
+        self.block1 = CNNBlock(in_channels, 16, padding=padding)
+        self.block2 = CNNBlock(16, 32, padding=padding)
+        self.block3 = CNNBlock(32, 64, padding=padding)
+        self.block4 = CNNBlock(64, 128, padding=padding)
+        self.block5 = CNNBlock(128, 256, padding=padding)
 
         self.gap = nn.AdaptiveAvgPool2d((1, 1))
 

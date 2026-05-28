@@ -31,6 +31,7 @@ def parse_args(config: BaselineConfig) -> BaselineConfig:
     parser.add_argument("--task_type", type=str, default=None, help="任務類型 (regression/classification)")
     parser.add_argument("--jump_threshold", type=float, default=None, help="classification 任務中 jump 的定義閾值")
     parser.add_argument("--model_type", type=str, default=None, help="模型類型 (CNN1/CNN4/CNN5)")
+    parser.add_argument("--padding", type=int, default=None, help="CNN padding 大小 (例如 1, 2)")
     parser.add_argument("--ivs_transform", type=str, default=None, help="IVS 特徵轉換方式 (raw/log/clip...)")
     parser.add_argument("--target_transform", type=str, default=None, help="Label (Target) 轉換方式 (raw/signed_log/arcsinh/winsorize)")
     parser.add_argument("--early_stopping", action="store_true", help="是否啟用 Early Stopping")
@@ -53,6 +54,7 @@ def parse_args(config: BaselineConfig) -> BaselineConfig:
     if args.exp_group is not None: config.exp_group = args.exp_group
     if args.exp_name is not None: config.exp_name = args.exp_name
     if args.model_type is not None: config.model_type = args.model_type
+    if args.padding is not None: config.padding = args.padding
     if args.ivs_transform is not None: config.ivs_transform = args.ivs_transform
     if args.target_transform is not None: config.target_transform = args.target_transform
     if args.learning_rate is not None: config.learning_rate = args.learning_rate
@@ -169,13 +171,13 @@ def get_transform_func(config: BaselineConfig, X_tensor: torch.Tensor):
 
     return get_ivs_transform(config.ivs_transform, **transform_kwargs)
 
-def get_model(model_name: str, input_channels: int, max_pool: bool, dropout_rate: float):
+def get_model(model_name: str, input_channels: int, padding: int, dropout_rate: float):
     if model_name == "CNN1":
-        return CNN1(input_channels, max_pool, dropout_rate)
+        return CNN1(input_channels, dropout_rate, padding=padding)
     elif model_name == "CNN4":
-        return CNN4(input_channels, max_pool, dropout_rate)
+        return CNN4(input_channels, dropout_rate, padding=padding)
     elif model_name == "CNN5":
-        return CNN5(input_channels, max_pool, dropout_rate)
+        return CNN5(input_channels, dropout_rate, padding=padding)
     else:
         raise ValueError(f"Unsupported model name: {model_name}")
 
@@ -211,7 +213,7 @@ def main():
             print(f"\n--- Training Ensemble Model {i+1}/{config.num_ensembles}. Seed: {current_seed} ---")
             start_time = time.time()
 
-            model = get_model(config.model_type, input_channels, config.max_pool, config.dropout_rate)
+            model = get_model(config.model_type, input_channels, config.padding, config.dropout_rate)
             if config.task_type == "classification":
                 criterion = nn.BCEWithLogitsLoss()
             else:
@@ -300,7 +302,7 @@ def main():
             print(f"Initializing Model {i+1}/{config.num_ensembles}")
             current_seed = init_seed + i
             set_seed(current_seed)
-            model = get_model(config.model_type, input_channels, config.max_pool, config.dropout_rate)
+            model = get_model(config.model_type, input_channels, config.padding, config.dropout_rate)
             criterion = nn.BCEWithLogitsLoss() if config.task_type == "classification" else nn.MSELoss()
             optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate, betas=(0.6, 0.999), weight_decay=config.l2_lambda)
             trainer = Trainer(model, optimizer, criterion, config.task_type, device, config.jump_threshold, l1_lambda=config.l1_lambda)
