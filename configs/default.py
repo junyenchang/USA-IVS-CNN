@@ -36,6 +36,7 @@ class BaselineConfig:
     shrcd: typing.Optional[typing.Tuple[int, ...]] = (10, 11, 12)
     exchcd: typing.Optional[typing.Tuple[int, ...]] = None
     return_outlier_quantile: typing.Optional[float] = 0.0
+    prc_limit: typing.Optional[float] = None
 
     # 控制 IVS 特徵的轉換方式:
     # 'raw' (原樣), 'log' (取對數 log1p), 'clip' (截尾固定上限), 'zscore', 'minmax', 'rgb',
@@ -45,7 +46,7 @@ class BaselineConfig:
     # 控制 Label (Target / 報酬率) 的轉換方式:
     # 'raw' (原樣), 'signed_log' (sign(x) * log1p(abs(x))), 'arcsinh'
     # 使用當期 cross-sectional 轉換: 'winsorize', 'rank'
-    target_transform: str = 'log100'
+    target_transform: str = 'zscore'
     # ---------------------------------------------------------
     # Model types
     # ---------------------------------------------------------
@@ -63,9 +64,13 @@ class BaselineConfig:
     l2_lambda: float = 0.0
     epochs: int = 100
 
+    # Ranking Loss 設定
+    rank_loss: bool = False
+    rank_lambda: float = 0.0
+
     # Early Stopping 設定
     use_early_stopping: bool = True
-    es_patience: int = 10         # 容忍幾個 epoch 驗證集沒有改善
+    es_patience: int = 15         # 容忍幾個 epoch 驗證集沒有改善
     es_min_delta: float = 0.0   # 被判定為有改善的最小變化量: 1e-4
 
     # ---------------------------------------------------------

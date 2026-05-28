@@ -14,7 +14,7 @@ from src.path import OptionPath
 from src.utils.experiment import ExperimentLogger
 from src.models.cnn import CNN1, CNN4, CNN5
 from src.trainers.trainer import Trainer, EarlyStopping
-from src.data.dataset import IVSDataset, TimeGroupBatchSampler
+from src.data.dataset import IVSDataset
 from src.data.transforms import get_ivs_transform, get_target_transform
 from src.backtester.backtest import BacktestEngine
 from src.utils.seed import set_seed
@@ -33,6 +33,7 @@ def parse_args(config: BaselineConfig) -> BaselineConfig:
     parser.add_argument("--model_type", type=str, default=None, help="模型類型 (CNN1/CNN4/CNN5)")
     parser.add_argument("--ivs_transform", type=str, default=None, help="IVS 特徵轉換方式 (raw/log/clip...)")
     parser.add_argument("--target_transform", type=str, default=None, help="Label (Target) 轉換方式 (raw/signed_log/arcsinh/winsorize)")
+    parser.add_argument("--early_stopping", action="store_true", help="是否啟用 Early Stopping")
     parser.add_argument("--learning_rate", type=float, default=None)
     parser.add_argument("--dropout_rate", type=float, default=None)
     parser.add_argument("--l1_lambda", type=float, default=None)
@@ -45,8 +46,7 @@ def parse_args(config: BaselineConfig) -> BaselineConfig:
     parser.add_argument("--shrcd", type=int, nargs="+", default=None, help="篩選 Share Code (例如 --shrcd 10 11)")
     parser.add_argument("--exchcd", type=int, nargs="+", default=None, help="篩選 Exchange Code (例如 --exchcd 1 2 3)")
     parser.add_argument("--return_outlier_quantile", type=float, default=None, help="篩選極端報酬分位數 (對 future_return 做去除，如 0.01)")
-    parser.add_argument("--rank_loss", action="store_true", help="是否啟用 TimeGroupBatchSampler 與 Ranking Loss")
-    parser.add_argument("--rank_lambda", type=float, default=None, help="ranking loss 佔總 loss 的權重")
+    parser.add_argument("--prc_limit", type=float, default=None, help="篩選股票價格下限 (例如 --prc_limit 5.0)")
 
     args = parser.parse_args()
 
@@ -74,9 +74,8 @@ def parse_args(config: BaselineConfig) -> BaselineConfig:
     if args.shrcd is not None: config.shrcd = args.shrcd
     if args.exchcd is not None: config.exchcd = args.exchcd
     if args.return_outlier_quantile is not None: config.return_outlier_quantile = args.return_outlier_quantile
-    if args.rank_loss is not None: config.rank_loss = args.rank_loss
-    if args.rank_lambda is not None: config.rank_lambda = args.rank_lambda
-
+    if args.early_stopping is not None: config.use_early_stopping = args.early_stopping
+    if args.prc_limit is not None: config.prc_limit = args.prc_limit
     if config.task_type == "classification":
         print(f"Task is classification. Forcing target_transform to 'raw' to avoid interfering with 0/1 labeling.")
         config.target_transform = 'raw'
@@ -104,7 +103,8 @@ def prepare_datasets(config: BaselineConfig, train_start: int, train_end: int, v
         target_transform=target_transform_func,
         shrcd=config.shrcd,
         exchcd=config.exchcd,
-        return_outlier_quantile=config.return_outlier_quantile
+        return_outlier_quantile=config.return_outlier_quantile,
+        prc_limit=config.prc_limit
     )
 
     train_cutoff = pd.Timestamp(f"{train_end}-12-01")
@@ -140,7 +140,8 @@ def prepare_datasets(config: BaselineConfig, train_start: int, train_end: int, v
         target_transform=target_transform_func,
         shrcd=config.shrcd,
         exchcd=config.exchcd,
-        return_outlier_quantile=config.return_outlier_quantile
+        return_outlier_quantile=config.return_outlier_quantile,
+        prc_limit=config.prc_limit
     )
     val_dataset.set_transform(ivs_transform_func)
 
@@ -196,24 +197,8 @@ def main():
             val_start=config.standard_train_end_year + 1,
             val_end=config.val_end_year
         )
-
-        if config.rank_loss:
-            train_batch_sampler = TimeGroupBatchSampler(
-                dates=train_dataset.dates,
-                batch_size=config.batch_size,
-                shuffle=True
-            )
-
-            val_batch_sampler = TimeGroupBatchSampler(
-                dates=val_dataset.dates,
-                batch_size=config.batch_size,
-                shuffle=False
-            )
-            train_loader = DataLoader(train_dataset, batch_sampler=train_batch_sampler)
-            val_loader = DataLoader(val_dataset, batch_sampler=val_batch_sampler)
-        else:
-            train_loader = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True)
-            val_loader = DataLoader(val_dataset, batch_size=config.batch_size, shuffle=False)
+        train_loader = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True)
+        val_loader = DataLoader(val_dataset, batch_size=config.batch_size, shuffle=False)
         sample_x, _, _, _, _ = train_dataset[0]
         input_channels = sample_x.shape[0]
 
