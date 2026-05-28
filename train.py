@@ -217,7 +217,7 @@ def main():
             else:
                 rank_weight = config.rank_lambda if config.rank_loss else 0.0
                 criterion = MSERankingLoss(rank_lambda=rank_weight)
-            optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate, weight_decay=config.l2_lambda)
+            optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate, betas=(0.6, 0.999), weight_decay=config.l2_lambda)
 
             trainer = Trainer(model, optimizer, criterion, config.task_type, device, config.jump_threshold, l1_lambda=config.l1_lambda)
 
@@ -302,7 +302,7 @@ def main():
             set_seed(current_seed)
             model = get_model(config.model_type, input_channels, config.max_pool, config.dropout_rate)
             criterion = nn.BCEWithLogitsLoss() if config.task_type == "classification" else nn.MSELoss()
-            optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate, weight_decay=config.l2_lambda)
+            optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate, betas=(0.6, 0.999), weight_decay=config.l2_lambda)
             trainer = Trainer(model, optimizer, criterion, config.task_type, device, config.jump_threshold, l1_lambda=config.l1_lambda)
             trainer.fit(warm_loader, warm_loader, epochs=config.warm_up_epochs) # We don't need to early stop during warm-up, so we can pass the same loader for train and val
 
