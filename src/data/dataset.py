@@ -22,7 +22,8 @@ class IVSDataset(Dataset):
         global_returns: typing.Optional[pd.DataFrame] = None,
         shrcd: typing.Optional[typing.Tuple[int, ...]] = None,
         exchcd: typing.Optional[typing.Tuple[int, ...]] = None,
-        return_outlier_quantile: typing.Optional[float] = None
+        return_outlier_quantile: typing.Optional[float] = None,
+        prc_limit: typing.Optional[float] = None
     ):
         self.data_dir = data_dir
         self.value_col = value_col
@@ -33,7 +34,7 @@ class IVSDataset(Dataset):
         self.shrcd = shrcd
         self.exchcd = exchcd
         self.return_outlier_quantile = return_outlier_quantile
-
+        self.prc_limit = prc_limit
         self.X_list: typing.List[torch.Tensor] = []
         self.y_list: typing.List[torch.Tensor] = []
         self.date_list: typing.List[np.ndarray] = []
@@ -51,6 +52,8 @@ class IVSDataset(Dataset):
             if self.return_outlier_quantile is not None:
                 q = int(self.return_outlier_quantile) * 100
                 filter_suffix += f"_roq{q}pct"
+            if self.prc_limit is not None:
+                filter_suffix += f"_prc{self.prc_limit}"
 
             cache_file = os.path.join(OptionPath.Cache, f"ivs_tensor_{year}{grid_suffix}{filter_suffix}.pt")
 
@@ -157,6 +160,7 @@ class IVSDataset(Dataset):
             right_on=['permno', 'target_for_month'],
             how='left'
         )
+        df_merged = df_merged[df_merged["eom_prc"] >= self.prc_limit] if self.prc_limit is not None else df_merged
         df_merged = df_merged.dropna(subset=['future_return'])
 
         if self.return_outlier_quantile is not None:
@@ -218,45 +222,3 @@ class IVSDataset(Dataset):
             x = self.transform(x)
 
         return x, self.y[idx], opt_date_str, permno, self.y_raw[idx].item()
-
-class TimeGroupBatchSampler(Sampler):
-    """
-    自訂 Batch Sampler, 確保每個 batch 內的資料都來自同一個時間點 (Date/Month)。
-    """
-    def __init__(self, dates, batch_size, shuffle=True):
-        self.batch_size = batch_size
-        self.shuffle = shuffle
-
-        # 建立 Date 到 Indices 的映射
-        self.date_to_indices = defaultdict(list)
-        for idx, date in enumerate(dates):
-            # 取決於 dates 的資料型態，假設是字串或 numpy 元素，直接作為 key
-            self.date_to_indices[date].append(idx)
-
-        self.unique_dates = list(self.date_to_indices.keys())
-
-        # 預先計算總共有多少個 batch 提供 __len__ 使用
-        self.num_batches = 0
-        for indices in self.date_to_indices.values():
-            # 無條件進位
-            self.num_batches += (len(indices) + self.batch_size - 1) // self.batch_size
-
-    def __iter__(self):
-        # 1. 決定日期的抽樣順序 (避免每次都按時間先後訓練，增加隨機性)
-        if self.shuffle:
-            np.random.shuffle(self.unique_dates)
-
-        # 2. 針對每一個日期，產生屬於該日期的 Batches
-        for date in self.unique_dates:
-            indices = self.date_to_indices[date]
-
-            if self.shuffle:
-                # 3. 打亂當月股票的順序
-                indices = np.random.permutation(indices).tolist()
-
-            # 4. 依照 batch_size 切割並 yield 出去
-            for i in range(0, len(indices), self.batch_size):
-                yield indices[i : i + self.batch_size]
-
-    def __len__(self):
-        return self.num_batches
