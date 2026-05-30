@@ -18,7 +18,7 @@ from src.data.dataset import IVSDataset
 from src.data.transforms import get_ivs_transform, get_target_transform
 from src.backtester.backtest import BacktestEngine
 from src.utils.seed import set_seed
-from src.utils.loss import MSERankingLoss
+
 pd.set_option('future.no_silent_downcasting', True)
 
 def parse_args(config: BaselineConfig) -> BaselineConfig:
@@ -214,12 +214,8 @@ def main():
             start_time = time.time()
 
             model = get_model(config.model_type, input_channels, config.padding, config.dropout_rate)
-            if config.task_type == "classification":
-                criterion = nn.BCEWithLogitsLoss()
-            else:
-                rank_weight = config.rank_lambda if config.rank_loss else 0.0
-                criterion = MSERankingLoss(rank_lambda=rank_weight)
-            optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate, betas=(0.6, 0.999), weight_decay=config.l2_lambda)
+            criterion = nn.MSELoss() if config.task_type == "regression" else nn.BCEWithLogitsLoss()
+            optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate, weight_decay=config.l2_lambda)
 
             trainer = Trainer(model, optimizer, criterion, config.task_type, device, config.jump_threshold, l1_lambda=config.l1_lambda)
 
@@ -304,7 +300,10 @@ def main():
             set_seed(current_seed)
             model = get_model(config.model_type, input_channels, config.padding, config.dropout_rate)
             criterion = nn.BCEWithLogitsLoss() if config.task_type == "classification" else nn.MSELoss()
-            optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate, betas=(0.6, 0.999), weight_decay=config.l2_lambda)
+            if config.training_strategy == 'rolling_finetune':
+                optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate, betas=(0.6, 0.999), weight_decay=config.l2_lambda)
+            else:
+                optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate, weight_decay=config.l2_lambda)
             trainer = Trainer(model, optimizer, criterion, config.task_type, device, config.jump_threshold, l1_lambda=config.l1_lambda)
             trainer.fit(warm_loader, warm_loader, epochs=config.warm_up_epochs) # We don't need to early stop during warm-up, so we can pass the same loader for train and val
 
