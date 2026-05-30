@@ -84,7 +84,7 @@ class Trainer:
             loss.backward() # 4. Backward pass (反向傳播計算梯度)
 
             # torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0) # 梯度裁剪，防止梯度爆炸
-            total_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+            # total_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
             # print(f"Gradient Norm: {total_norm:.4f}")
 
             self.optimizer.step() # 5. 更新權重
@@ -97,11 +97,11 @@ class Trainer:
         return avg_loss
 
     def evaluate(self, dataloader: torch.utils.data.DataLoader):
-        self.model.eval() # 設定為評估模式
+        self.model.eval()
         total_loss = 0.0
         total_samples = 0
 
-        with torch.no_grad(): # 評估時不需要計算梯度，節省記憶體
+        with torch.no_grad():
             for batch_data in dataloader:
                 X_batch: torch.Tensor = batch_data[0].to(self.device)
                 y_batch: torch.Tensor = batch_data[1].to(self.device)
@@ -111,7 +111,6 @@ class Trainer:
                     raw_y_batch = y_batch
                 batch_size: int = X_batch.size(0)
 
-                # 分類任務轉標籤
                 if self.task_type == "classification":
                     if self.jump_threshold < 0:
                         y_batch = (raw_y_batch <= self.jump_threshold).float()
@@ -159,9 +158,9 @@ class Trainer:
 
         with torch.no_grad():
             for batch_data in dataloader:
-                X_batch: torch.Tensor = batch_data[0].to(self.device)
-                y_batch: torch.Tensor = batch_data[1].to(self.device)
-                dates_batch: typing.List[str] = batch_data[2]
+                X_batch: torch.Tensor = batch_data[0].to(self.device) # t
+                y_batch: torch.Tensor = batch_data[1].to(self.device) # t+1 的報酬率
+                dates_batch: typing.List[str] = batch_data[2] # X 的日期
                 permnos_batch: torch.Tensor = batch_data[3]
 
                 if len(batch_data) > 4:
