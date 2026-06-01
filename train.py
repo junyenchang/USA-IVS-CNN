@@ -42,6 +42,7 @@ def parse_args(config: BaselineConfig) -> BaselineConfig:
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--num_ensembles", type=int, default=None)
     parser.add_argument("--training_strategy", type=str, default=None, help="訓練機制 (standard/expanding/rolling_finetune)")
+    parser.add_argument("--new_optimizer", action="store_true", help="在擴展窗口訓練時中是否每次時間窗推進都重置優化器")
     parser.add_argument("--step_months", type=int, default=None, help="時間窗推進的步長 (月數)")
     parser.add_argument("--lookback_months", type=int, default=None, help="針對 rolling_finetune, 往回看的歷史資料長度 (月數), 0 表示僅使用新資料")
     parser.add_argument("--shrcd", type=int, nargs="+", default=None, help="篩選 Share Code (例如 --shrcd 10 11)")
@@ -78,6 +79,7 @@ def parse_args(config: BaselineConfig) -> BaselineConfig:
     if args.return_outlier_quantile is not None: config.return_outlier_quantile = args.return_outlier_quantile
     if args.early_stopping is not None: config.use_early_stopping = args.early_stopping
     if args.prc_limit is not None: config.prc_limit = args.prc_limit
+    if args.new_optimizer is not None: config.new_optimizer = args.new_optimizer
     if config.task_type == "classification":
         print(f"Task is classification. Forcing target_transform to 'raw' to avoid interfering with 0/1 labeling.")
         config.target_transform = 'raw'
@@ -214,7 +216,13 @@ def main():
             start_time = time.time()
 
             model = get_model(config.model_type, input_channels, config.padding, config.dropout_rate)
-            criterion = nn.MSELoss() if config.task_type == "regression" else nn.BCEWithLogitsLoss()
+            if config.task_type == "classification":
+                num_positives = (train_dataset.y == 1).sum().item()
+                num_negatives = (train_dataset.y == 0).sum().item()
+                pos_weight = torch.tensor([num_negatives / num_positives], dtype=torch.float32).to(device)
+                criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+            else:
+                criterion = nn.MSELoss()
             optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate, weight_decay=config.l2_lambda)
 
             trainer = Trainer(model, optimizer, criterion, config.task_type, device, config.jump_threshold, l1_lambda=config.l1_lambda)
@@ -238,7 +246,7 @@ def main():
             trainer = None # type: ignore
             optimizer = None
             criterion = None
-            model = None
+            model = None # type: ignore
             gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
@@ -299,7 +307,13 @@ def main():
             current_seed = init_seed + i
             set_seed(current_seed)
             model = get_model(config.model_type, input_channels, config.padding, config.dropout_rate)
-            criterion = nn.BCEWithLogitsLoss() if config.task_type == "classification" else nn.MSELoss()
+            if config.task_type == "classification":
+                num_positives = (warm_train_subset.y == 1).sum().item()
+                num_negatives = (warm_train_subset.y == 0).sum().item()
+                pos_weight = torch.tensor([num_negatives / num_positives], dtype=torch.float32).to(device)
+                criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+            else:
+                criterion = nn.MSELoss()
             if config.training_strategy == 'rolling_finetune':
                 optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate, betas=(0.6, 0.999), weight_decay=config.l2_lambda)
             else:
@@ -387,8 +401,11 @@ def main():
             print(f"Fine-tuning {len(model_states)} models from {finetune_start.strftime('%Y-%m')} to {safe_finetune_end.strftime('%Y-%m')}")
             for state in model_states:
                 trainer: Trainer = state['trainer']
-                # for param_group in trainer.optimizer.param_groups:
-                #     param_group['lr'] = config.learning_rate * 0.1
+                model: nn.Module = state['model']
+                if config.new_optimizer:
+                    new_optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate, weight_decay=config.l2_lambda)
+                    trainer.optimizer = new_optimizer
+                    state['optimizer'] = new_optimizer
                 trainer.fit(finetune_loader, finetune_loader, epochs=config.transfer_epochs) # Don't need early stopping during fine-tuning too
 
             current_end = test_end
