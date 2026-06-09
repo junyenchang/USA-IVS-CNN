@@ -114,6 +114,8 @@ def get_target_transform(transform_type: typing.Optional[str], **kwargs) -> typi
         return lambda x: np.log1p(x)
     elif transform_type.lower() == 'log100':
         return lambda x: np.log1p(x) * 100
+    elif transform_type.lower() == '100y':
+        return lambda x: x * 100
     elif transform_type.lower() == 'win_100':
         def cs_winsorize(x, dates=None, **kw):
             if dates is None:
