@@ -40,6 +40,8 @@ def parse_args(config: BaselineConfig) -> BaselineConfig:
     parser.add_argument("--l1_lambda", type=float, default=None)
     parser.add_argument("--l2_lambda", type=float, default=None)
     parser.add_argument("--epochs", type=int, default=None)
+    parser.add_argument("--warm_up_epochs", type=int, default=None)
+    parser.add_argument("--transfer_epochs", type=int, default=None)
     parser.add_argument("--num_ensembles", type=int, default=None)
     parser.add_argument("--training_strategy", type=str, default=None, help="訓練機制 (standard/expanding/rolling_finetune)")
     parser.add_argument("--new_optimizer", action="store_true", help="在擴展窗口訓練時中是否每次時間窗推進都重置優化器")
@@ -49,6 +51,7 @@ def parse_args(config: BaselineConfig) -> BaselineConfig:
     parser.add_argument("--exchcd", type=int, nargs="+", default=None, help="篩選 Exchange Code (例如 --exchcd 1 2 3)")
     parser.add_argument("--return_outlier_quantile", type=float, default=None, help="篩選極端報酬分位數 (對 future_return 做去除，如 0.01)")
     parser.add_argument("--prc_limit", type=float, default=None, help="篩選股票價格下限 (例如 --prc_limit 5.0)")
+    parser.add_argument("--reverse_block", action="store_true", help="是否將 CNN 區塊內的卷積層順序反轉")
 
     args = parser.parse_args()
 
@@ -80,9 +83,12 @@ def parse_args(config: BaselineConfig) -> BaselineConfig:
     if args.early_stopping is not None: config.use_early_stopping = args.early_stopping
     if args.prc_limit is not None: config.prc_limit = args.prc_limit
     if args.new_optimizer is not None: config.new_optimizer = args.new_optimizer
+    if args.reverse_block is not None: config.block_reverse = args.reverse_block
     if config.task_type == "classification":
         print(f"Task is classification. Forcing target_transform to 'raw' to avoid interfering with 0/1 labeling.")
         config.target_transform = 'raw'
+    if args.warm_up_epochs is not None: config.warm_up_epochs = args.warm_up_epochs
+    if args.transfer_epochs is not None: config.transfer_epochs = args.transfer_epochs
 
     return config
 
@@ -134,6 +140,9 @@ def prepare_datasets(config: BaselineConfig, train_start: int, train_end: int, v
         transform_kwargs['min_val'] = train_dataset.X.min().item()
         transform_kwargs['max_val'] = torch.quantile(sample_X, 0.99).item()
         transform_kwargs['cmap_name'] = 'viridis'
+    elif config.ivs_transform == 'divide_by_spy':
+        spy_by_month = load_spy_ivs_by_month(os.path.join(OptionPath.SPY_IVS, f'spy_ivs.parquet'))
+        transform_kwargs['spy_by_month'] = spy_by_month
 
     ivs_transform_func = get_ivs_transform(config.ivs_transform, **transform_kwargs)
     train_dataset.set_transform(ivs_transform_func)
@@ -150,6 +159,48 @@ def prepare_datasets(config: BaselineConfig, train_start: int, train_end: int, v
     val_dataset.set_transform(ivs_transform_func)
 
     return train_dataset, val_dataset
+
+def load_spy_ivs_by_month(spy_path: str) -> typing.Dict[pd.Period, torch.Tensor]:
+    spy_df = pd.read_parquet(spy_path).copy()
+    if spy_df.empty:
+        raise ValueError(f"SPY IVS file is empty: {spy_path}")
+
+    spy_df["opt_date"] = pd.to_datetime(spy_df["opt_date"])
+    spy_df["days"] = spy_df["days"].astype(int)
+    spy_df["delta"] = spy_df["delta"].round().astype(int)
+    spy_df["month"] = spy_df["opt_date"].dt.to_period("M")
+
+    days_order = sorted(spy_df["days"].unique())
+    all_deltas = list(spy_df["delta"].unique())
+    put_deltas = sorted([d for d in all_deltas if d < 0 and d >= -50])
+    call_deltas = sorted([d for d in all_deltas if d > 0 and d <= 50])
+    col_order = call_deltas + put_deltas
+
+    spy_by_month: typing.Dict[pd.Period, torch.Tensor] = {}
+    last_valid_surface = None
+    for month, month_df in spy_df.groupby("month", sort=True):
+        month_surface = month_df.pivot_table(
+            index="days",
+            columns="delta",
+            values="impl_volatility",
+            aggfunc="last",
+        ).reindex(index=days_order, columns=col_order)
+
+        if month_surface.isna().all().all():
+
+            if last_valid_surface is None:
+                raise ValueError(f"No previous SPY IVS for {month}")
+
+            month_surface = last_valid_surface.copy()
+
+        elif month_surface.isna().any().any():
+            missing = int(month_surface.isna().sum().sum())
+            raise ValueError(f"SPY IVS month {month} has {missing} missing cells")
+
+        last_valid_surface = month_surface
+        spy_by_month[month] = torch.tensor(month_surface.to_numpy(dtype=np.float32), dtype=torch.float32).unsqueeze(0) # type: ignore
+
+    return spy_by_month
 
 def get_transform_func(config: BaselineConfig, X_tensor: torch.Tensor):
     """根據輸入張量的統計資訊，構建 IVS Transform 函數。"""
@@ -170,16 +221,19 @@ def get_transform_func(config: BaselineConfig, X_tensor: torch.Tensor):
         transform_kwargs['min_val'] = X_tensor.min().item()
         transform_kwargs['max_val'] = torch.quantile(sample_X, 0.99).item()
         transform_kwargs['cmap_name'] = 'viridis'
+    elif config.ivs_transform == 'divide_by_spy':
+        spy_by_month = load_spy_ivs_by_month(os.path.join(OptionPath.SPY_IVS, f'spy_ivs.parquet'))
+        transform_kwargs['spy_by_month'] = spy_by_month
 
     return get_ivs_transform(config.ivs_transform, **transform_kwargs)
 
-def get_model(model_name: str, input_channels: int, padding: int, dropout_rate: float):
+def get_model(model_name: str, input_channels: int, padding: int, dropout_rate: float, reverse_block: bool) -> nn.Module:
     if model_name == "CNN1":
-        return CNN1(input_channels, dropout_rate, padding=padding)
+        return CNN1(input_channels, dropout_rate, padding=padding, reverse_block=reverse_block)
     elif model_name == "CNN4":
-        return CNN4(input_channels, dropout_rate, padding=padding)
+        return CNN4(input_channels, dropout_rate, padding=padding, reverse_block=reverse_block)
     elif model_name == "CNN5":
-        return CNN5(input_channels, dropout_rate, padding=padding)
+        return CNN5(input_channels, dropout_rate, padding=padding, reverse_block=reverse_block)
     else:
         raise ValueError(f"Unsupported model name: {model_name}")
 
@@ -215,15 +269,15 @@ def main():
             print(f"\n--- Training Ensemble Model {i+1}/{config.num_ensembles}. Seed: {current_seed} ---")
             start_time = time.time()
 
-            model = get_model(config.model_type, input_channels, config.padding, config.dropout_rate)
+            model = get_model(config.model_type, input_channels, config.padding, config.dropout_rate, reverse_block=config.block_reverse)
             if config.task_type == "classification":
                 num_positives = (train_dataset.y == 1).sum().item()
                 num_negatives = (train_dataset.y == 0).sum().item()
-                pos_weight = torch.tensor([num_negatives / num_positives], dtype=torch.float32).to(device)
+                pos_weight = torch.tensor([np.sqrt(num_negatives / num_positives)], dtype=torch.float32).to(device)
                 criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
             else:
                 criterion = nn.MSELoss()
-            optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate, weight_decay=config.l2_lambda)
+            optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate, weight_decay=config.l2_lambda)
 
             trainer = Trainer(model, optimizer, criterion, config.task_type, device, config.jump_threshold, l1_lambda=config.l1_lambda)
 
@@ -306,18 +360,18 @@ def main():
             print(f"Initializing Model {i+1}/{config.num_ensembles}")
             current_seed = init_seed + i
             set_seed(current_seed)
-            model = get_model(config.model_type, input_channels, config.padding, config.dropout_rate)
+            model = get_model(config.model_type, input_channels, config.padding, config.dropout_rate, reverse_block=config.block_reverse)
             if config.task_type == "classification":
                 num_positives = (warm_train_subset.y == 1).sum().item()
                 num_negatives = (warm_train_subset.y == 0).sum().item()
-                pos_weight = torch.tensor([num_negatives / num_positives], dtype=torch.float32).to(device)
+                pos_weight = torch.tensor([np.sqrt(num_negatives / num_positives)], dtype=torch.float32).to(device)
                 criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
             else:
                 criterion = nn.MSELoss()
             if config.training_strategy == 'rolling_finetune':
-                optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate, betas=(0.6, 0.999), weight_decay=config.l2_lambda)
+                optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate, betas=(0.6, 0.999), weight_decay=config.l2_lambda)
             else:
-                optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate, weight_decay=config.l2_lambda)
+                optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate, weight_decay=config.l2_lambda)
             trainer = Trainer(model, optimizer, criterion, config.task_type, device, config.jump_threshold, l1_lambda=config.l1_lambda)
             trainer.fit(warm_loader, warm_loader, epochs=config.warm_up_epochs) # We don't need to early stop during warm-up, so we can pass the same loader for train and val
 
@@ -403,7 +457,7 @@ def main():
                 trainer: Trainer = state['trainer']
                 model: nn.Module = state['model']
                 if config.new_optimizer:
-                    new_optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate, weight_decay=config.l2_lambda)
+                    new_optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate, weight_decay=config.l2_lambda)
                     trainer.optimizer = new_optimizer
                     state['optimizer'] = new_optimizer
                 trainer.fit(finetune_loader, finetune_loader, epochs=config.transfer_epochs) # Don't need early stopping during fine-tuning too
