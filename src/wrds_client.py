@@ -3,6 +3,8 @@ import time
 import os
 import pandas as pd
 
+from src.path import OptionPath
+
 class WRDSClient:
     """處理 WRDS 資料庫抓取與資料壓縮的 DataLoader"""
 
@@ -509,3 +511,36 @@ class WRDSClient:
         else:
             print("未抓取到 Fama-French 無風險利率資料。")
 
+    def fetch_nyse_cap_breakpoints(self, output_dir: str=OptionPath.NYSE_BP, start_year: int=1996):
+        print(f"Fetching NYSE cap breakpoints (80%). start years: {start_year}...")
+
+        sql_query = f"""
+            SELECT
+                a.date,
+                PERCENTILE_CONT(0.80) WITHIN GROUP (ORDER BY ABS(a.prc) * a.shrout) AS cap80
+            FROM
+                crsp.msf AS a
+            JOIN
+                crsp.msenames AS b
+                ON a.permno = b.permno
+                AND a.date >= b.namedt
+                AND a.date <= b.nameendt
+            WHERE
+                b.exchcd = 1
+                AND a.date >= '{start_year}-01-01'
+                AND a.prc IS NOT NULL
+                AND a.shrout IS NOT NULL
+            GROUP BY
+                a.date
+            ORDER BY
+                a.date
+            """
+
+        df = self.db.raw_sql(sql_query, date_cols=['date'])
+
+        if not df.empty:
+            file_name = os.path.join(output_dir, 'nyse_market_cap_breakpoints.parquet')
+            df.to_parquet(file_name, engine='pyarrow')
+            print(f"NYSE 市值分位數資料已儲存至 {file_name}")
+        else:
+            print("未抓取到 NYSE 市值分位數資料。")
